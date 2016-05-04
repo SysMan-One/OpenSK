@@ -30,14 +30,13 @@ typedef uint32_t SkBool32;
 
 SK_DEFINE_HANDLE(SkInstance)
 SK_DEFINE_HANDLE(SkPhysicalDevice)
-SK_DEFINE_HANDLE(SkPhysicalComponent)
-SK_DEFINE_HANDLE(SkPhysicalSubcomponent)
-SK_DEFINE_HANDLE(SkDevice)
+SK_DEFINE_HANDLE(SkDeviceComponent)
 
 #define SK_TRUE 1
 #define SK_FALSE 0
 #define SK_MAX_EXTENSION_NAME_SIZE 256
 #define SK_MAX_PHYSICAL_DEVICE_NAME_SIZE 256
+#define SK_MAX_DEVICE_COMPONENT_NAME_SIZE 256
 #define SK_MAX_DRIVER_NAME_SIZE 256
 #define SK_MAX_MIXER_NAME_SIZE 256
 
@@ -50,13 +49,26 @@ typedef enum SkResult {
   SK_ERROR_OUT_OF_HOST_MEMORY,
   SK_ERROR_INITIALIZATION_FAILED,
   SK_ERROR_EXTENSION_NOT_PRESENT,
-  SK_ERROR_FAILED_ENUMERATING_PHYSICAL_DEVICES
+  SK_ERROR_FAILED_QUERYING_DEVICE
 } SkResult;
 
 typedef enum SkAllocationScope {
   SK_SYSTEM_ALLOCATION_SCOPE_INSTANCE = 0,
   SK_SYSTEM_ALLOCATION_SCOPE_DEVICE
 } SkAllocationScope;
+
+typedef enum SkRangeDirection {
+  SK_RANGE_DIRECTION_UNKNOWN,
+  SK_RANGE_DIRECTION_LESS,
+  SK_RANGE_DIRECTION_EQUAL,
+  SK_RANGE_DIRECTION_GREATER
+} SkRangeDirection;
+
+typedef enum SkStreamType {
+  SK_STREAM_TYPE_PLAYBACK = 1<<0,
+  SK_STREAM_TYPE_CAPTURE  = 1<<1
+} SkStreamType;
+typedef SkFlags SkStreamTypes;
 
 typedef void* (SKAPI_PTR *PFN_skAllocationFunction)(
   void*                             pUserData,
@@ -71,6 +83,11 @@ typedef void* (SKAPI_PTR *PFN_skFreeFunction)(
 );
 
 typedef SkFlags SkInstanceCreateFlags;
+
+typedef struct SkRangedValue {
+  uint32_t                          value;
+  SkRangeDirection                  direction;
+} SkRangedValue;
 
 typedef struct SkApplicationInfo {
   const char*                       pApplicationName;
@@ -105,6 +122,28 @@ typedef struct SkExtensionProperties {
   uint32_t                          specVersion;
 } SkExtensionProperties;
 
+typedef struct SkDeviceComponentProperties {
+  char                              componentName[SK_MAX_DEVICE_COMPONENT_NAME_SIZE];
+  SkStreamTypes                     supportedStreams;
+} SkDeviceComponentProperties;
+
+typedef struct SkDeviceComponentLimits {
+  uint32_t                          maxChannels;
+  uint32_t                          minChannels;
+  uint32_t                          maxFrameSize;
+  uint32_t                          minFrameSize;
+  SkRangedValue                     maxBufferTime;
+  SkRangedValue                     minBufferTime;
+  SkRangedValue                     maxPeriodSize;
+  SkRangedValue                     minPeriodSize;
+  SkRangedValue                     maxPeriodTime;
+  SkRangedValue                     minPeriodTime;
+  SkRangedValue                     maxPeriods;
+  SkRangedValue                     minPeriods;
+  SkRangedValue                     maxRate;
+  SkRangedValue                     minRate;
+} SkDeviceComponentLimits;
+
 ////////////////////////////////////////////////////////////////////////////////
 // Standard Functions
 ////////////////////////////////////////////////////////////////////////////////
@@ -131,8 +170,25 @@ SKAPI_ATTR SkResult SKAPI_CALL skEnumeratePhysicalDevices(
 );
 
 SKAPI_ATTR void SKAPI_CALL skGetPhysicalDeviceProperties(
-    SkPhysicalDevice                  physicalDevice,
-    SkPhysicalDeviceProperties*       pProperties
+  SkPhysicalDevice                  physicalDevice,
+  SkPhysicalDeviceProperties*       pProperties
+);
+
+SKAPI_ATTR SkResult SKAPI_CALL skEnumerateDeviceComponents(
+  SkPhysicalDevice                  device,
+  uint32_t*                         pDeviceComponentCount,
+  SkDeviceComponent*                pDeviceComponents
+);
+
+SKAPI_ATTR void SKAPI_CALL skGetDeviceComponentProperties(
+  SkDeviceComponent                 deviceComponent,
+  SkDeviceComponentProperties*      pProperties
+);
+
+SKAPI_ATTR void SKAPI_CALL skGetDeviceComponentLimits(
+  SkDeviceComponent                 deviceComponent,
+  SkStreamType                      streamType,
+  SkDeviceComponentLimits*          pLimits
 );
 
 ////////////////////////////////////////////////////////////////////////////////
