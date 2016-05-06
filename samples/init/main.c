@@ -34,9 +34,9 @@ char const *toRangeModifier(SkRangeDirection dir) {
   return "";
 }
 
-void printDeviceComponentLimits(SkDeviceComponent component, SkStreamType streamType) {
-  SkDeviceComponentLimits limits;
-  skGetDeviceComponentLimits(component, streamType, &limits);
+void printPhysicalComponentLimits(SkPhysicalComponent component, SkStreamType streamType) {
+  SkComponentLimits limits;
+  skGetPhysicalComponentLimits(component, streamType, &limits);
   printf(" |_ Channels   : [%7u , %7u ]\n",    limits.minChannels,         limits.maxChannels);
   printf(" |_ Frame Size : [%7u , %7u ]\n",    limits.minFrameSize,        limits.maxFrameSize);
   printf(" |_ Rate       : [%7u%s, %7u%s]\n",  limits.minRate.value,       toRangeModifier(limits.minRate.direction),       limits.maxRate.value,       toRangeModifier(limits.maxRate.direction));
@@ -46,10 +46,10 @@ void printDeviceComponentLimits(SkDeviceComponent component, SkStreamType stream
   printf(" \\_ Period Time: [%7u%s, %7u%s]\n", limits.minPeriodTime.value, toRangeModifier(limits.minPeriodTime.direction), limits.maxPeriodTime.value, toRangeModifier(limits.maxPeriodTime.direction));
 }
 
-void printDeviceComponentInfo(SkDeviceComponent component) {
-  SkDeviceComponentProperties properties;
+void printPhysicalComponentInfo(SkPhysicalComponent component) {
+  SkComponentProperties properties;
 
-  skGetDeviceComponentProperties(component, &properties);
+  skGetPhysicalComponentProperties(component, &properties);
 
   char const *support = "N/A";
   switch (properties.supportedStreams) {
@@ -67,43 +67,104 @@ void printDeviceComponentInfo(SkDeviceComponent component) {
   printf("=> %s (%s)\n", properties.componentName, support);
   if (properties.supportedStreams & SK_STREAM_TYPE_PLAYBACK) {
     printf(" + Playback Limits\n");
-    printDeviceComponentLimits(component, SK_STREAM_TYPE_PLAYBACK);
+    printPhysicalComponentLimits(component, SK_STREAM_TYPE_PLAYBACK);
   }
   if (properties.supportedStreams & SK_STREAM_TYPE_CAPTURE) {
     printf(" + Capture Limits\n");
-    printDeviceComponentLimits(component, SK_STREAM_TYPE_CAPTURE);
+    printPhysicalComponentLimits(component, SK_STREAM_TYPE_CAPTURE);
+  }
+}
+
+void printVirtualComponentInfo(SkVirtualComponent component) {
+  SkComponentProperties properties;
+
+  skGetVirtualComponentProperties(component, &properties);
+
+  SkResult result = SK_INCOMPLETE;
+  SkPhysicalComponent physicalComponent = SK_NULL_HANDLE;
+  char const *support = "N/A";
+  switch (properties.supportedStreams) {
+    case SK_STREAM_TYPE_PLAYBACK:
+      support = "PLAYBACK";
+      result = skResolvePhysicalComponent(component, SK_STREAM_TYPE_PLAYBACK, &physicalComponent);
+      break;
+    case SK_STREAM_TYPE_CAPTURE:
+      support = "CAPTURE";
+      result = skResolvePhysicalComponent(component, SK_STREAM_TYPE_CAPTURE, &physicalComponent);
+      break;
+    case SK_STREAM_TYPE_CAPTURE | SK_STREAM_TYPE_PLAYBACK:
+      support = "PLAYBACK|CAPTURE";
+      result = skResolvePhysicalComponent(component, SK_STREAM_TYPE_PLAYBACK | SK_STREAM_TYPE_CAPTURE, &physicalComponent);
+      break;
+  }
+
+  printf("=> %s (%s)\n", properties.componentName, support);
+  if (result == SK_SUCCESS) {
+    SkPhysicalDevice physicalDevice;
+    skResolvePhysicalDevice(physicalComponent, &physicalDevice);
+
+    SkDeviceProperties deviceProperties;
+    SkComponentProperties componentProperties;
+    skGetPhysicalDeviceProperties(physicalDevice, &deviceProperties);
+    skGetPhysicalComponentProperties(physicalComponent, &componentProperties);
+
+    printf(" \\_ %s (%s)\n", deviceProperties.deviceName, componentProperties.componentName);
   }
 }
 
 void printPhysicalDeviceInfo(SkPhysicalDevice device) {
   SkResult result;
-  SkPhysicalDeviceProperties properties;
+  SkDeviceProperties properties;
 
   skGetPhysicalDeviceProperties(device, &properties);
   printf("==================================\n");
   printf("Device : %s\n", properties.deviceName);
   printf("Driver : %s\n", properties.driverName);
   printf("Mixer  : %s\n", properties.mixerName );
-  if (properties.available == SK_FALSE)
-    printf("WARNING: Device is no longer available!");
   printf("----------------------------------\n");
 
   uint32_t componentCount;
-  result = skEnumerateDeviceComponents(device, &componentCount, NULL);
+  result = skEnumeratePhysicalComponents(device, &componentCount, NULL);
   if (result != SK_SUCCESS) {
     printf("Failed to query the number of device components: %d\n", result);
     abort();
   }
 
-  SkDeviceComponent *components = (SkDeviceComponent*)malloc(sizeof(SkDeviceComponent) * componentCount);
-  result = skEnumerateDeviceComponents(device, &componentCount, components);
+  SkPhysicalComponent *components = (SkPhysicalComponent*)malloc(sizeof(SkPhysicalComponent) * componentCount);
+  result = skEnumeratePhysicalComponents(device, &componentCount, components);
   if (result != SK_SUCCESS) {
     printf("Failed to fill the array with the properties of device components: %d\n", result);
     abort();
   }
 
   for (uint32_t idx = 0; idx < componentCount; ++idx) {
-    printDeviceComponentInfo(components[idx]);
+    printPhysicalComponentInfo(components[idx]);
+  }
+}
+
+void printVirtualDeviceInfo(SkVirtualDevice vDevice) {
+  SkResult result;
+  SkDeviceProperties properties;
+
+  skGetVirtualDeviceProperties(vDevice, &properties);
+  printf("Device : %s\n", properties.deviceName);
+
+  uint32_t componentCount;
+  result = skEnumerateVirtualComponents(vDevice, &componentCount, NULL);
+  if (result != SK_SUCCESS) {
+    printf("Failed to query the number of device components: %d\n", result);
+    abort();
+  }
+
+  SkVirtualComponent *components = (SkVirtualComponent*)malloc(sizeof(SkVirtualComponent) * componentCount);
+  result = skEnumerateVirtualComponents(vDevice, &componentCount, components);
+  if (result != SK_SUCCESS) {
+    printf("Failed to fill the array with the properties of device components: %d\n", result);
+    abort();
+  }
+
+  for (uint32_t idx = 0; idx < componentCount; ++idx) {
+    printVirtualComponentInfo(components[idx]);
   }
 }
 
@@ -197,8 +258,31 @@ int main() {
     abort();
   }
 
+  printf(": PHYSICAL DEVICES :::::::::::::::\n");
   for (uint32_t idx = 0; idx < deviceCount; ++idx) {
     printPhysicalDeviceInfo(devices[idx]);
+  }
+
+  //////////////////////////////////////////////////////////////////////////////
+  // Enumerate virtual devices
+  //////////////////////////////////////////////////////////////////////////////
+  uint32_t vDeviceCount;
+  result = skEnumerateVirtualDevices(instance, &vDeviceCount, NULL);
+  if (result != SK_SUCCESS) {
+    printf("Failed to query the number of physical devices: %d\n", result);
+    abort();
+  }
+
+  SkVirtualDevice *vDevices = (SkVirtualDevice*)malloc(sizeof(SkVirtualDevice) * vDeviceCount);
+  result = skEnumerateVirtualDevices(instance, &vDeviceCount, vDevices);
+  if (result != SK_SUCCESS) {
+    printf("Failed to fill the array with the properties of physical devices: %d\n", result);
+    abort();
+  }
+
+  printf("\n: VIRTUAL  DEVICES :::::::::::::::\n");
+  for (uint32_t idx = 0; idx < vDeviceCount; ++idx) {
+    printVirtualDeviceInfo(vDevices[idx]);
   }
 
   //////////////////////////////////////////////////////////////////////////////

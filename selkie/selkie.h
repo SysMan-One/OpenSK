@@ -30,13 +30,17 @@ typedef uint32_t SkBool32;
 
 SK_DEFINE_HANDLE(SkInstance)
 SK_DEFINE_HANDLE(SkPhysicalDevice)
-SK_DEFINE_HANDLE(SkDeviceComponent)
+SK_DEFINE_HANDLE(SkPhysicalComponent)
+SK_DEFINE_HANDLE(SkVirtualDevice)
+SK_DEFINE_HANDLE(SkVirtualComponent)
+SK_DEFINE_HANDLE(SkStream)
 
 #define SK_TRUE 1
 #define SK_FALSE 0
 #define SK_MAX_EXTENSION_NAME_SIZE 256
-#define SK_MAX_PHYSICAL_DEVICE_NAME_SIZE 256
-#define SK_MAX_DEVICE_COMPONENT_NAME_SIZE 256
+#define SK_MAX_DEVICE_NAME_SIZE 256
+#define SK_MAX_COMPONENT_NAME_SIZE 256
+#define SK_MAX_COMPONENT_DESC_SIZE 256
 #define SK_MAX_DRIVER_NAME_SIZE 256
 #define SK_MAX_MIXER_NAME_SIZE 256
 
@@ -49,7 +53,9 @@ typedef enum SkResult {
   SK_ERROR_OUT_OF_HOST_MEMORY,
   SK_ERROR_INITIALIZATION_FAILED,
   SK_ERROR_EXTENSION_NOT_PRESENT,
-  SK_ERROR_FAILED_QUERYING_DEVICE
+  SK_ERROR_FAILED_QUERYING_DEVICE,
+  SK_ERROR_FAILED_RESOLVING_DEVICE,
+  SK_ERROR_NOT_IMPLEMENTED
 } SkResult;
 
 typedef enum SkAllocationScope {
@@ -110,24 +116,23 @@ typedef struct SkAllocationCallbacks {
   PFN_skFreeFunction                pfnFree;
 } SkAllocationCallbacks;
 
-typedef struct SkPhysicalDeviceProperties {
-  SkBool32                          available;
-  char                              deviceName[SK_MAX_PHYSICAL_DEVICE_NAME_SIZE];
-  char                              driverName[SK_MAX_DRIVER_NAME_SIZE];
-  char                              mixerName[SK_MAX_MIXER_NAME_SIZE];
-} SkPhysicalDeviceProperties;
-
 typedef struct SkExtensionProperties {
   char                              extensionName[SK_MAX_EXTENSION_NAME_SIZE];
   uint32_t                          specVersion;
 } SkExtensionProperties;
 
-typedef struct SkDeviceComponentProperties {
-  char                              componentName[SK_MAX_DEVICE_COMPONENT_NAME_SIZE];
-  SkStreamTypes                     supportedStreams;
-} SkDeviceComponentProperties;
+typedef struct SkDeviceProperties {
+  char                              deviceName[SK_MAX_DEVICE_NAME_SIZE];
+  char                              driverName[SK_MAX_DRIVER_NAME_SIZE];
+  char                              mixerName[SK_MAX_MIXER_NAME_SIZE];
+} SkDeviceProperties;
 
-typedef struct SkDeviceComponentLimits {
+typedef struct SkComponentProperties {
+  char                              componentName[SK_MAX_COMPONENT_NAME_SIZE];
+  SkStreamTypes                     supportedStreams;
+} SkComponentProperties;
+
+typedef struct SkComponentLimits {
   uint32_t                          maxChannels;
   uint32_t                          minChannels;
   uint32_t                          maxFrameSize;
@@ -142,7 +147,7 @@ typedef struct SkDeviceComponentLimits {
   SkRangedValue                     minPeriods;
   SkRangedValue                     maxRate;
   SkRangedValue                     minRate;
-} SkDeviceComponentLimits;
+} SkComponentLimits;
 
 ////////////////////////////////////////////////////////////////////////////////
 // Standard Functions
@@ -171,24 +176,57 @@ SKAPI_ATTR SkResult SKAPI_CALL skEnumeratePhysicalDevices(
 
 SKAPI_ATTR void SKAPI_CALL skGetPhysicalDeviceProperties(
   SkPhysicalDevice                  physicalDevice,
-  SkPhysicalDeviceProperties*       pProperties
+  SkDeviceProperties*               pProperties
 );
 
-SKAPI_ATTR SkResult SKAPI_CALL skEnumerateDeviceComponents(
-  SkPhysicalDevice                  device,
-  uint32_t*                         pDeviceComponentCount,
-  SkDeviceComponent*                pDeviceComponents
+SKAPI_ATTR SkResult SKAPI_CALL skEnumeratePhysicalComponents(
+  SkPhysicalDevice                  physicalDevice,
+  uint32_t*                         pPhysicalComponentCount,
+  SkPhysicalComponent*              pPhysicalComponents
 );
 
-SKAPI_ATTR void SKAPI_CALL skGetDeviceComponentProperties(
-  SkDeviceComponent                 deviceComponent,
-  SkDeviceComponentProperties*      pProperties
+SKAPI_ATTR void SKAPI_CALL skGetPhysicalComponentProperties(
+  SkPhysicalComponent               physicalComponent,
+  SkComponentProperties*            pProperties
 );
 
-SKAPI_ATTR void SKAPI_CALL skGetDeviceComponentLimits(
-  SkDeviceComponent                 deviceComponent,
+SKAPI_ATTR void SKAPI_CALL skGetPhysicalComponentLimits(
+  SkPhysicalComponent               physicalComponent,
   SkStreamType                      streamType,
-  SkDeviceComponentLimits*          pLimits
+  SkComponentLimits*                pLimits
+);
+
+SKAPI_ATTR SkResult SKAPI_CALL skEnumerateVirtualDevices(
+  SkInstance                        instance,
+  uint32_t*                         pVirtualDeviceCount,
+  SkVirtualDevice*                  pVirtualDevices
+);
+
+SKAPI_ATTR void SKAPI_CALL skGetVirtualDeviceProperties(
+  SkVirtualDevice                   virtualDevice,
+  SkDeviceProperties*               pProperties
+);
+
+SKAPI_ATTR SkResult SKAPI_CALL skEnumerateVirtualComponents(
+  SkVirtualDevice                   virtualDevice,
+  uint32_t*                         pVirtualComponentCount,
+  SkVirtualComponent*               pVirtualComponents
+);
+
+SKAPI_ATTR void SKAPI_CALL skGetVirtualComponentProperties(
+  SkVirtualComponent                virtualComponent,
+  SkComponentProperties*            pProperties
+);
+
+SKAPI_ATTR SkResult SKAPI_CALL skResolvePhysicalComponent(
+  SkVirtualComponent                virtualComponent,
+  SkStreamType                      streamType,
+  SkPhysicalComponent*              pPhysicalComponent
+);
+
+SKAPI_ATTR void SKAPI_CALL skResolvePhysicalDevice(
+  SkPhysicalComponent               physicalComponent,
+  SkPhysicalDevice*                 pPhysicalDevice
 );
 
 ////////////////////////////////////////////////////////////////////////////////
