@@ -1,26 +1,12 @@
 /*******************************************************************************
- * selkie - All content 2016 Trent Reed, all rights reserved.
+ * OpenSK - All content 2016 Trent Reed, all rights reserved.
  *------------------------------------------------------------------------------
- * SelKie sample application (iterates audio devices).
+ * OpenSK sample application (iterates audio devices).
  ******************************************************************************/
-#include <selkie/selkie.h>
+#include <OpenSK/opensk.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-#define EXTENSION_COUNT 1
-
-void deviceEventCallbackSEA(void* pUserData, SkDeviceEventSEA* event) {
-  (void)pUserData;
-  switch (event->type) {
-    case SK_DEVICE_EVENT_ADDED_SEA:
-      printf("Device Added\n");
-      break;
-    case SK_DEVICE_EVENT_REMOVED_SEA:
-      printf("Device Removed\n");
-      break;
-  }
-}
 
 char const *toRangeModifier(SkRangeDirection dir) {
   switch (dir) {
@@ -30,8 +16,10 @@ char const *toRangeModifier(SkRangeDirection dir) {
       return " ";
     case SK_RANGE_DIRECTION_GREATER:
       return "+";
+    default:
+      break;
   }
-  return "";
+  return " ";
 }
 
 void printPhysicalComponentLimits(SkPhysicalComponent component, SkStreamType streamType) {
@@ -179,7 +167,7 @@ SkBool32 checkForExtension(char const *extensionName, uint32_t extensionCount, S
 
 int main() {
   //////////////////////////////////////////////////////////////////////////////
-  // Check SelKie extensions
+  // Check OpenSK extensions
   //////////////////////////////////////////////////////////////////////////////
   SkResult result;
   uint32_t extensionCount;
@@ -210,29 +198,20 @@ int main() {
   }
 
   //////////////////////////////////////////////////////////////////////////////
-  // Create SelKie instance
+  // Create OpenSK instance
   //////////////////////////////////////////////////////////////////////////////
   SkApplicationInfo applicationInfo;
-  applicationInfo.pApplicationName = "Sample";
-  applicationInfo.pEngineName = "Engine";
+  applicationInfo.pApplicationName = "device";
+  applicationInfo.pEngineName = "selkie";
   applicationInfo.applicationVersion = 1;
   applicationInfo.engineVersion = 1;
   applicationInfo.apiVersion = SK_API_VERSION_0_0;
 
-  SkBool32 devicePollingExt = SK_FALSE;
-  uint32_t requiredExtensionCount = 0;
-  char const *requiredExtensions[EXTENSION_COUNT];
-  if (checkForExtension(SK_SEA_DEVICE_POLLING_EXTENSION_NAME, extensionCount, extensions)) {
-    requiredExtensions[requiredExtensionCount] = SK_SEA_DEVICE_POLLING_EXTENSION_NAME;
-    ++requiredExtensionCount;
-    devicePollingExt = SK_TRUE;
-  }
-
   SkInstanceCreateInfo instanceInfo;
   instanceInfo.flags = 0;
   instanceInfo.pApplicationInfo = &applicationInfo;
-  instanceInfo.enabledExtensionCount = requiredExtensionCount;
-  instanceInfo.ppEnabledExtensionNames = requiredExtensions;
+  instanceInfo.enabledExtensionCount = 0;
+  instanceInfo.ppEnabledExtensionNames = NULL;
 
   SkInstance instance;
   result = skCreateInstance(&instanceInfo, NULL, &instance);
@@ -283,13 +262,6 @@ int main() {
   printf("\n: VIRTUAL  DEVICES :::::::::::::::\n");
   for (uint32_t idx = 0; idx < vDeviceCount; ++idx) {
     printVirtualDeviceInfo(vDevices[idx]);
-  }
-
-  //////////////////////////////////////////////////////////////////////////////
-  // Register for device callbacks
-  //////////////////////////////////////////////////////////////////////////////
-  if (devicePollingExt) {
-    skRegisterDeviceCallbackSEA(instance, SK_DEVICE_EVENT_ALL_SEA, &deviceEventCallbackSEA, NULL);
   }
 
   //////////////////////////////////////////////////////////////////////////////

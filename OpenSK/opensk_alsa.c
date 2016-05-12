@@ -1,10 +1,10 @@
 /*******************************************************************************
- * selkie - All content 2016 Trent Reed, all rights reserved.
+ * OpenSK - All content 2016 Trent Reed, all rights reserved.
  *------------------------------------------------------------------------------
- * SelKie standard implementation. (ALSA Implementation)
+ * OpenSK standard implementation. (ALSA Implementation)
  ******************************************************************************/
 
-#include "selkie.h"
+#include "opensk.h"
 #include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
@@ -28,6 +28,14 @@ typedef struct SkExtensionData_device_polling_SEA {
   struct udev*                  pUdev;
   struct udev_monitor*          pUdevMonitor;
 } SkExtensionData_device_polling_SEA;
+
+typedef struct SkStream_T {
+  SkStream                      pNext;
+  snd_pcm_t*                    handle;
+  SkInstance                    instance;
+  SkStreamRequestInfo           requestInfo;
+  SkStreamInfo                  streamInfo;
+} SkStream_T;
 
 typedef struct SkPhysicalComponent_T {
   char                          identifier[SK_ALSA_MAX_IDENTIFIER_NAME_SIZE];
@@ -62,6 +70,7 @@ typedef struct SkVirtualDevice_T {
 } SkVirtualDevice_T;
 
 typedef struct SkInstance_T {
+  SkStream                      pStreams;
   const SkAllocationCallbacks*  pAllocator;
   SkPhysicalDevice_T*           pPhysicalDevices;
   SkVirtualDevice_T*            pVirtualDevices;
@@ -104,6 +113,13 @@ typedef struct SkExtensionPropertiesInternal {
 ////////////////////////////////////////////////////////////////////////////////
 // Implementation Functions (Internal)
 ////////////////////////////////////////////////////////////////////////////////
+typedef union IntEndianCheck { uint32_t u32; unsigned char u8[4]; } IntEndianCheck;
+typedef union FloatEndianCheck { float f32; unsigned char u8[4]; } FloatEndianCheck;
+static IntEndianCheck intEndianCheck = { 1 };
+static FloatEndianCheck floatEndianCheck = { 1.0f };
+#define SK_INT_IS_BIGENDIAN() intEndianCheck.u8[0] == 1
+#define SK_FLOAT_IS_BIGENDIAN() floatEndianCheck.u8[0] != 0
+
 snd_pcm_stream_t toLocalPcmStreamType(SkStreamType type) {
   switch (type) {
     case SK_STREAM_TYPE_CAPTURE:
@@ -115,6 +131,149 @@ snd_pcm_stream_t toLocalPcmStreamType(SkStreamType type) {
   }
   // Default to PCM Playback
   return SND_PCM_STREAM_PLAYBACK;
+}
+
+static int toLocalPcmAccessMode(SkAccessMode mode) {
+  switch (mode) {
+    case SK_ACCESS_MODE_BLOCK:
+      return 0;
+    case SK_ACCESS_MODE_NONBLOCK:
+      return SND_PCM_NONBLOCK;
+    case SK_ACCESS_MODE_ASYNC:
+      return SND_PCM_ASYNC;
+  }
+}
+
+static snd_pcm_access_t toLocalPcmAccessType(SkAccessType type) {
+  switch (type) {
+    case SK_ACCESS_TYPE_INTERLEAVED:
+      return SND_PCM_ACCESS_RW_INTERLEAVED;
+    case SK_ACCESS_TYPE_NONINTERLEAVED:
+      return SND_PCM_ACCESS_RW_NONINTERLEAVED;
+    case SK_ACCESS_TYPE_MMAP_INTERLEAVED:
+      return SND_PCM_ACCESS_MMAP_INTERLEAVED;
+    case SK_ACCESS_TYPE_MMAP_NONINTERLEAVED:
+      return SND_PCM_ACCESS_MMAP_NONINTERLEAVED;
+    case SK_ACCESS_TYPE_MMAP_COMPLEX:
+      return SND_PCM_ACCESS_MMAP_COMPLEX;
+  }
+}
+
+static SkAccessType toSkAccessType(snd_pcm_access_t type) {
+  switch (type) {
+    case SND_PCM_ACCESS_RW_INTERLEAVED:
+      return SK_ACCESS_TYPE_INTERLEAVED;
+    case SND_PCM_ACCESS_RW_NONINTERLEAVED:
+      return SK_ACCESS_TYPE_NONINTERLEAVED;
+    case SND_PCM_ACCESS_MMAP_INTERLEAVED:
+      return SK_ACCESS_TYPE_MMAP_INTERLEAVED;
+    case SND_PCM_ACCESS_MMAP_NONINTERLEAVED:
+      return SK_ACCESS_TYPE_MMAP_NONINTERLEAVED;
+    case SND_PCM_ACCESS_MMAP_COMPLEX:
+      return SK_ACCESS_TYPE_MMAP_COMPLEX;
+  }
+}
+
+static snd_pcm_format_t toLocalPcmFormatType(SkFormat type) {
+  switch (type) {
+    case SK_FORMAT_S8:
+      return SND_PCM_FORMAT_S8;
+    case SK_FORMAT_U8:
+      return SND_PCM_FORMAT_U8;
+    case SK_FORMAT_S16_LE:
+      return SND_PCM_FORMAT_S16_LE;
+    case SK_FORMAT_S16_BE:
+      return SND_PCM_FORMAT_S16_BE;
+    case SK_FORMAT_U16_LE:
+      return SND_PCM_FORMAT_U16_LE;
+    case SK_FORMAT_U16_BE:
+      return SND_PCM_FORMAT_U16_BE;
+    case SK_FORMAT_S24_LE:
+      return SND_PCM_FORMAT_S24_LE;
+    case SK_FORMAT_S24_BE:
+      return SND_PCM_FORMAT_S24_BE;
+    case SK_FORMAT_U24_LE:
+      return SND_PCM_FORMAT_U24_LE;
+    case SK_FORMAT_U24_BE:
+      return SND_PCM_FORMAT_U24_BE;
+    case SK_FORMAT_S32_LE:
+      return SND_PCM_FORMAT_S32_LE;
+    case SK_FORMAT_S32_BE:
+      return SND_PCM_FORMAT_S32_BE;
+    case SK_FORMAT_U32_LE:
+      return SND_PCM_FORMAT_U32_LE;
+    case SK_FORMAT_U32_BE:
+      return SND_PCM_FORMAT_U32_BE;
+    case SK_FORMAT_FLOAT_LE:
+      return SND_PCM_FORMAT_FLOAT_LE;
+    case SK_FORMAT_FLOAT_BE:
+      return SND_PCM_FORMAT_FLOAT_BE;
+    case SK_FORMAT_FLOAT64_LE:
+      return SND_PCM_FORMAT_FLOAT64_LE;
+    case SK_FORMAT_FLOAT64_BE:
+      return SND_PCM_FORMAT_FLOAT64_BE;
+    case SK_FORMAT_S16:
+      return (SK_INT_IS_BIGENDIAN()) ? SND_PCM_FORMAT_S16_BE : SND_PCM_FORMAT_S16_LE;
+    case SK_FORMAT_U16:
+      return (SK_INT_IS_BIGENDIAN()) ? SND_PCM_FORMAT_U16_BE : SND_PCM_FORMAT_U16_LE;
+    case SK_FORMAT_S24:
+      return (SK_INT_IS_BIGENDIAN()) ? SND_PCM_FORMAT_S24_BE : SND_PCM_FORMAT_S24_LE;
+    case SK_FORMAT_U24:
+      return (SK_INT_IS_BIGENDIAN()) ? SND_PCM_FORMAT_U24_BE : SND_PCM_FORMAT_U24_LE;
+    case SK_FORMAT_S32:
+      return (SK_INT_IS_BIGENDIAN()) ? SND_PCM_FORMAT_S32_BE : SND_PCM_FORMAT_S32_LE;
+    case SK_FORMAT_U32:
+      return (SK_INT_IS_BIGENDIAN()) ? SND_PCM_FORMAT_U32_BE : SND_PCM_FORMAT_U32_LE;
+    case SK_FORMAT_FLOAT:
+      return (SK_FLOAT_IS_BIGENDIAN()) ? SND_PCM_FORMAT_FLOAT_BE : SND_PCM_FORMAT_FLOAT_LE;
+    case SK_FORMAT_FLOAT64:
+      return (SK_FLOAT_IS_BIGENDIAN()) ? SND_PCM_FORMAT_FLOAT64_BE : SND_PCM_FORMAT_FLOAT64_LE;
+    case SK_FORMAT_UNKNOWN:
+      return SND_PCM_FORMAT_UNKNOWN;
+  }
+}
+
+static SkFormat toSkFormat(snd_pcm_format_t type) {
+  switch (type) {
+    case SND_PCM_FORMAT_S8:
+      return SK_FORMAT_S8;
+    case SND_PCM_FORMAT_U8:
+      return SK_FORMAT_U8;
+    case SND_PCM_FORMAT_S16_LE:
+      return SK_FORMAT_S16_LE;
+    case SND_PCM_FORMAT_S16_BE:
+      return SK_FORMAT_S16_BE;
+    case SND_PCM_FORMAT_U16_LE:
+      return SK_FORMAT_U16_LE;
+    case SND_PCM_FORMAT_U16_BE:
+      return SK_FORMAT_U16_BE;
+    case SND_PCM_FORMAT_S24_LE:
+      return SK_FORMAT_S24_LE;
+    case SND_PCM_FORMAT_S24_BE:
+      return SK_FORMAT_S24_BE;
+    case SND_PCM_FORMAT_U24_LE:
+      return SK_FORMAT_U24_LE;
+    case SND_PCM_FORMAT_U24_BE:
+      return SK_FORMAT_U24_BE;
+    case SND_PCM_FORMAT_S32_LE:
+      return SK_FORMAT_S32_LE;
+    case SND_PCM_FORMAT_S32_BE:
+      return SK_FORMAT_S32_BE;
+    case SND_PCM_FORMAT_U32_LE:
+      return SK_FORMAT_U32_LE;
+    case SND_PCM_FORMAT_U32_BE:
+      return SK_FORMAT_U32_BE;
+    case SND_PCM_FORMAT_FLOAT_LE:
+      return SK_FORMAT_FLOAT_LE;
+    case SND_PCM_FORMAT_FLOAT_BE:
+      return SK_FORMAT_FLOAT_BE;
+    case SND_PCM_FORMAT_FLOAT64_LE:
+      return SK_FORMAT_FLOAT64_LE;
+    case SND_PCM_FORMAT_FLOAT64_BE:
+      return SK_FORMAT_FLOAT64_BE;
+    default:
+      return SK_FORMAT_UNKNOWN;
+  }
 }
 
 static SkResult skConstructExtension_device_polling_SEA(SkInstance instance) {
@@ -598,6 +757,7 @@ SKAPI_ATTR SkResult SKAPI_CALL skCreateInstance(
 
   // Configure instance
   instance->pPhysicalDevices = NULL;
+  instance->pStreams = NULL;
   instance->pAllocator = pAllocator;
   instance->extension_device_polling_SEA.initialized = SK_FALSE;
 
@@ -635,13 +795,35 @@ SKAPI_ATTR void SKAPI_CALL skDestroyInstance(
   if (instance->extension_device_polling_SEA.initialized) {
     udev_unref(instance->extension_device_polling_SEA.pUdev);
   }
+
+  // Destroy Physical Devices
   SkPhysicalDevice currPhysicalDevice = instance->pPhysicalDevices;
   SkPhysicalDevice nextPhysicalDevice;
-  while (nextPhysicalDevice) {
+  while (currPhysicalDevice) {
     nextPhysicalDevice = currPhysicalDevice->next;
     instance->pAllocator->pfnFree(instance->pAllocator->pUserData, currPhysicalDevice);
     currPhysicalDevice = nextPhysicalDevice;
   }
+
+  // Destroy Virtual Devices
+  SkVirtualDevice currVirtualDevice = instance->pVirtualDevices;
+  SkVirtualDevice nextVirtualDevice;
+  while (currVirtualDevice) {
+    nextVirtualDevice = currVirtualDevice->next;
+    instance->pAllocator->pfnFree(instance->pAllocator->pUserData, currVirtualDevice);
+    currVirtualDevice = nextVirtualDevice;
+  }
+
+  // Destroy Streams
+  SkStream currStream = instance->pStreams;
+  SkStream nextStream;
+  while (currStream) {
+    nextStream = currStream->pNext;
+    snd_pcm_close(currStream->handle);
+    instance->pAllocator->pfnFree(instance->pAllocator->pUserData, currStream);
+    currStream = nextStream;
+  }
+
   instance->pAllocator->pfnFree(instance->pAllocator->pUserData, instance);
 }
 
@@ -860,6 +1042,236 @@ SKAPI_ATTR void SKAPI_CALL skResolvePhysicalDevice(
   SkPhysicalDevice*                 pPhysicalDevice
 ) {
   *pPhysicalDevice = physicalComponent->physicalDevice;
+}
+
+#define PCM_CHECK(call) if (call < 0) { snd_pcm_close(handle); return SK_ERROR_UNSUPPORTED_STREAM_REQUEST; }
+SKAPI_ATTR SkResult SKAPI_CALL skRequestDefaultStream(
+  SkInstance                        instance,
+  SkStreamRequestInfo*              pStreamRequestInfo,
+  SkStream*                         pStream
+) {
+  int iValue;
+  unsigned int uiValue;
+  snd_pcm_uframes_t ufValue;
+  snd_pcm_access_t aValue;
+  snd_pcm_format_t fValue;
+  SkStreamInfo streamInfo;
+
+  // Check that it's one stream type
+  switch (pStreamRequestInfo->streamType) {
+    case SK_STREAM_TYPE_CAPTURE:
+    case SK_STREAM_TYPE_PLAYBACK:
+      break;
+    default:
+      return SK_ERROR_INVALID_STREAM_REQUEST;
+  }
+  switch (pStreamRequestInfo->accessMode) {
+    case SK_ACCESS_MODE_ASYNC:
+    case SK_ACCESS_MODE_NONBLOCK:
+    case SK_ACCESS_MODE_BLOCK:
+      break;
+    default:
+      return SK_ERROR_INVALID_STREAM_REQUEST;
+  }
+
+  int mode = toLocalPcmAccessMode(pStreamRequestInfo->accessMode);
+  snd_pcm_stream_t stream = toLocalPcmStreamType(pStreamRequestInfo->streamType);
+
+  snd_pcm_t *handle;
+  if (snd_pcm_open(&handle, "default", stream, mode) != 0) {
+    return SK_ERROR_FAILED_STREAM_REQUEST;
+  }
+
+  snd_pcm_hw_params_t *hwParams;
+  snd_pcm_hw_params_alloca(&hwParams);
+  PCM_CHECK(snd_pcm_hw_params_any(handle, hwParams))
+
+  // Access Type (Default = First)
+  if (pStreamRequestInfo->accessType != SK_ACCESS_TYPE_ANY) {
+    snd_pcm_access_t access = toLocalPcmAccessType(pStreamRequestInfo->accessType);
+    PCM_CHECK(snd_pcm_hw_params_set_access(handle, hwParams, access))
+  }
+
+  // Format (Default = First)
+  if (pStreamRequestInfo->formatType != SK_FORMAT_ANY) {
+    snd_pcm_format_t format = toLocalPcmFormatType(pStreamRequestInfo->formatType);
+    PCM_CHECK(snd_pcm_hw_params_set_format(handle, hwParams, format))
+  }
+
+  // Channels (Default = Minimum)
+  if (pStreamRequestInfo->channels != 0) {
+    uiValue = pStreamRequestInfo->channels;
+    PCM_CHECK(snd_pcm_hw_params_set_channels_near(handle, hwParams, &uiValue))
+  }
+
+  // Rate (Default = Minimum)
+  if (pStreamRequestInfo->rate != 0) {
+    uiValue = pStreamRequestInfo->rate; iValue = 0;
+    PCM_CHECK(snd_pcm_hw_params_set_rate_near(handle, hwParams, &uiValue, &iValue))
+  }
+
+  // Period (Default = Minimum)
+  if (pStreamRequestInfo->periods != 0) {
+    uiValue = pStreamRequestInfo->periods; iValue = 0;
+    PCM_CHECK(snd_pcm_hw_params_set_periods_near(handle, hwParams, &uiValue, &iValue))
+  }
+
+  // Period Time (Default = Minimum)
+  if (pStreamRequestInfo->periodSize > 0) {
+    ufValue = pStreamRequestInfo->periodSize; iValue = 0;
+    PCM_CHECK(snd_pcm_hw_params_set_period_size_near(handle, hwParams, &ufValue, &iValue))
+  }
+  else if (pStreamRequestInfo->periodTime > 0) {
+    uiValue = pStreamRequestInfo->periodTime; iValue = 0;
+    PCM_CHECK(snd_pcm_hw_params_set_period_time_near(handle, hwParams, &uiValue, &iValue))
+  }
+
+  // Buffer Size (Default = Maximum)
+  if (pStreamRequestInfo->bufferSize > 0) {
+    ufValue = pStreamRequestInfo->bufferSize; iValue = 0;
+    PCM_CHECK(snd_pcm_hw_params_set_buffer_size_near(handle, hwParams, &ufValue))
+  }
+  else if (pStreamRequestInfo->bufferTime > 0) {
+    uiValue = pStreamRequestInfo->bufferSize; iValue = 0;
+    PCM_CHECK(snd_pcm_hw_params_set_buffer_time_near(handle, hwParams, &uiValue, &iValue))
+  }
+
+  /* write the parameters to device */
+  int err = snd_pcm_hw_params(handle, hwParams);
+  if (err < 0) {
+    snd_pcm_close(handle);
+    return SK_ERROR_FAILED_STREAM_REQUEST;
+  }
+
+  // Gather the configuration space information
+  streamInfo.streamType = pStreamRequestInfo->streamType;
+  streamInfo.accessMode = pStreamRequestInfo->accessMode;
+  PCM_CHECK(snd_pcm_hw_params_get_access(hwParams, &aValue))
+  streamInfo.accessType = toSkAccessType(aValue);
+  PCM_CHECK(snd_pcm_hw_params_get_format(hwParams, &fValue))
+  streamInfo.formatType = toSkFormat(fValue);
+  streamInfo.formatBits = (uint32_t)snd_pcm_format_physical_width(fValue);
+  PCM_CHECK(snd_pcm_hw_params_get_periods(hwParams, &uiValue, &iValue))
+  assignRangeAndDirection(&streamInfo.periods, uiValue, iValue);
+  PCM_CHECK(snd_pcm_hw_params_get_channels(hwParams, &uiValue))
+  streamInfo.channels = uiValue;
+  PCM_CHECK(snd_pcm_hw_params_get_period_size(hwParams, &ufValue, &iValue))
+  streamInfo.periodSamples = ufValue;
+  PCM_CHECK(snd_pcm_hw_params_get_period_time(hwParams, &uiValue, &iValue))
+  assignRangeAndDirection(&streamInfo.periodTime, uiValue, iValue);
+  PCM_CHECK(snd_pcm_hw_params_get_buffer_size(hwParams, &ufValue))
+  streamInfo.bufferSamples = ufValue;
+  PCM_CHECK(snd_pcm_hw_params_get_buffer_time(hwParams, &uiValue, &iValue))
+  assignRangeAndDirection(&streamInfo.bufferTime, uiValue, iValue);
+  PCM_CHECK(snd_pcm_hw_params_get_rate(hwParams, &uiValue, &iValue))
+  assignRangeAndDirection(&streamInfo.rate, uiValue, iValue);
+  streamInfo.sampleBits = streamInfo.channels * streamInfo.formatBits;
+  streamInfo.bufferBits = streamInfo.bufferSamples * streamInfo.sampleBits;
+  streamInfo.sampleTime.value = streamInfo.periodTime.value / streamInfo.periodSamples;
+  streamInfo.sampleTime.direction = streamInfo.periodTime.direction;
+  streamInfo.periodBits = streamInfo.sampleBits * streamInfo.periodSamples;
+  // latency = periodsize * periods / (rate * bytes_per_frame)
+  streamInfo.latency = 8 * streamInfo.periodSamples * streamInfo.periods.value / (streamInfo.rate.value * streamInfo.sampleBits);
+
+  // Success! Create the stream -
+  SkStream finalStream =
+  (SkStream)instance->pAllocator->pfnAllocation(
+    instance->pAllocator->pUserData,
+    sizeof(SkStream_T),
+    0,
+    SK_SYSTEM_ALLOCATION_SCOPE_STREAM
+  );
+  finalStream->instance = instance;
+  finalStream->streamInfo = streamInfo;
+  finalStream->pNext = instance->pStreams;
+  finalStream->handle = handle;
+  instance->pStreams = finalStream;
+  *pStream = finalStream;
+
+  return SK_SUCCESS;
+}
+#undef PCM_CHECK
+
+SKAPI_ATTR SkResult SKAPI_CALL skGetStreamInfo(
+  SkStream                          stream,
+  SkStreamInfo*                     pStreamInfo
+) {
+  *pStreamInfo = stream->streamInfo;
+}
+
+static snd_pcm_sframes_t xrun_recovery(snd_pcm_t *handle, snd_pcm_sframes_t err)
+{
+  // An underrun occurred, open the stream back up and try again
+  if (err == -EPIPE) {
+    err = snd_pcm_prepare(handle);
+    if (err < 0) {
+      return SK_ERROR_FAILED_STREAM_WRITE;
+    }
+    return SK_ERROR_XRUN;
+  }
+  //
+  else if (err == -ESTRPIPE) {
+    while ((err = snd_pcm_resume(handle)) == -EAGAIN)
+      sleep(1);       /* wait until the suspend flag is released */
+    if (err < 0) {
+      err = snd_pcm_prepare(handle);
+      if (err < 0)
+        printf("Can't recovery from suspend, prepare failed: %s\n", snd_strerror(err));
+    }
+    return 0;
+  }
+  else if (err == -EBADFD) {
+    printf("Not the correct state?\n");
+  }
+  else {
+    printf("We do not know what happened.\n");
+  }
+  return err;
+}
+
+SKAPI_ATTR int64_t SKAPI_CALL skStreamWriteInterleaved(
+  SkStream                          stream,
+  void const*                       pBuffer,
+  uint32_t                          framesCount
+) {
+  snd_pcm_sframes_t err = 0;
+  for (;;) {
+    if ((err = snd_pcm_writei(stream->handle, pBuffer, framesCount)) < 0) {
+      if (err == -EAGAIN) continue;
+      if ((err = xrun_recovery(stream->handle, err)) < 0) {
+        return -SK_ERROR_FAILED_STREAM_WRITE;
+      }
+      continue;
+    }
+    break;
+  }
+  return err;
+}
+
+
+SKAPI_ATTR void SKAPI_CALL skDestroyStream(
+    SkStream                          stream,
+    SkBool32                          drain
+) {
+  // The device could be suspended - should we handle this?
+  if (drain == SK_TRUE) {
+    (void)snd_pcm_drain(stream->handle);
+  }
+  else {
+    (void)snd_pcm_drop(stream->handle);
+  }
+
+  // Fix the linked list
+  SkStream *prev = &stream->instance->pStreams;
+  while ((*prev) != stream) {
+    prev = &(*prev)->pNext;
+  }
+  (*prev) = stream->pNext;
+
+  stream->instance->pAllocator->pfnFree(
+    stream->instance->pAllocator->pUserData,
+    stream
+  );
 }
 
 ////////////////////////////////////////////////////////////////////////////////

@@ -1,5 +1,5 @@
 ################################################################################
-# Project: SelKie
+# Project: OpenSK
 # Legal  : Copyright Trent Reed 2016, All rights reserved.
 # Author : Trent Reed
 # Usage  : find_package(UDev) to find UDev libraries.

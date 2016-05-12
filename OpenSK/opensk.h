@@ -1,12 +1,12 @@
 /*******************************************************************************
- * selkie - All content 2016 Trent Reed, all rights reserved.
+ * OpenSK - All content 2016 Trent Reed, all rights reserved.
  *------------------------------------------------------------------------------
- * SelKie standard include header. (Implementation must adhere to this API)
+ * OpenSK standard include header. (Implementation must adhere to this API)
  ******************************************************************************/
-#ifndef SELKIE_H
-#define SELKIE_H 1
+#ifndef OPENSK_H
+#define OPENSK_H 1
 
-#include "selkie_platform.h"
+#include "opensk_platform.h"
 
 #ifdef    __cplusplus
 extern "C" {
@@ -55,12 +55,18 @@ typedef enum SkResult {
   SK_ERROR_EXTENSION_NOT_PRESENT,
   SK_ERROR_FAILED_QUERYING_DEVICE,
   SK_ERROR_FAILED_RESOLVING_DEVICE,
+  SK_ERROR_FAILED_STREAM_REQUEST,
+  SK_ERROR_INVALID_STREAM_REQUEST,
+  SK_ERROR_UNSUPPORTED_STREAM_REQUEST,
+  SK_ERROR_FAILED_STREAM_WRITE,
+  SK_ERROR_XRUN,
   SK_ERROR_NOT_IMPLEMENTED
 } SkResult;
 
 typedef enum SkAllocationScope {
   SK_SYSTEM_ALLOCATION_SCOPE_INSTANCE = 0,
-  SK_SYSTEM_ALLOCATION_SCOPE_DEVICE
+  SK_SYSTEM_ALLOCATION_SCOPE_DEVICE,
+  SK_SYSTEM_ALLOCATION_SCOPE_STREAM
 } SkAllocationScope;
 
 typedef enum SkRangeDirection {
@@ -74,7 +80,57 @@ typedef enum SkStreamType {
   SK_STREAM_TYPE_PLAYBACK = 1<<0,
   SK_STREAM_TYPE_CAPTURE  = 1<<1
 } SkStreamType;
+#define SK_STREAM_TYPE_MASK 0x3
+
 typedef SkFlags SkStreamTypes;
+
+typedef enum SkAccessType {
+  SK_ACCESS_TYPE_ANY,
+  SK_ACCESS_TYPE_INTERLEAVED,
+  SK_ACCESS_TYPE_NONINTERLEAVED,
+  SK_ACCESS_TYPE_MMAP_INTERLEAVED,
+  SK_ACCESS_TYPE_MMAP_NONINTERLEAVED,
+  SK_ACCESS_TYPE_MMAP_COMPLEX
+} SkAccessType;
+
+typedef enum SkAccessMode {
+  SK_ACCESS_MODE_BLOCK,
+  SK_ACCESS_MODE_NONBLOCK,
+  SK_ACCESS_MODE_ASYNC
+} SkAccessMode;
+
+typedef enum SkFormat {
+  SK_FORMAT_UNKNOWN = -1,
+  SK_FORMAT_ANY = 0,
+  SK_FORMAT_S8,
+  SK_FORMAT_U8,
+  SK_FORMAT_S16_LE,
+  SK_FORMAT_S16_BE,
+  SK_FORMAT_U16_LE,
+  SK_FORMAT_U16_BE,
+  SK_FORMAT_S24_LE,
+  SK_FORMAT_S24_BE,
+  SK_FORMAT_U24_LE,
+  SK_FORMAT_U24_BE,
+  SK_FORMAT_S32_LE,
+  SK_FORMAT_S32_BE,
+  SK_FORMAT_U32_LE,
+  SK_FORMAT_U32_BE,
+  SK_FORMAT_FLOAT_LE,
+  SK_FORMAT_FLOAT_BE,
+  SK_FORMAT_FLOAT64_LE,
+  SK_FORMAT_FLOAT64_BE,
+
+  // Will select machine-endian
+  SK_FORMAT_S16,
+  SK_FORMAT_U16,
+  SK_FORMAT_S24,
+  SK_FORMAT_U24,
+  SK_FORMAT_S32,
+  SK_FORMAT_U32,
+  SK_FORMAT_FLOAT,
+  SK_FORMAT_FLOAT64
+} SkFormat;
 
 typedef void* (SKAPI_PTR *PFN_skAllocationFunction)(
   void*                             pUserData,
@@ -148,6 +204,40 @@ typedef struct SkComponentLimits {
   SkRangedValue                     maxRate;
   SkRangedValue                     minRate;
 } SkComponentLimits;
+
+typedef struct SkStreamRequestInfo {
+  SkStreamType                      streamType;
+  SkAccessMode                      accessMode;
+  SkAccessType                      accessType;
+  SkFormat                          formatType;
+  uint32_t                          channels;
+  uint32_t                          periods;
+  uint32_t                          periodSize;
+  uint32_t                          periodTime;
+  uint32_t                          rate;
+  uint32_t                          bufferSize;
+  uint32_t                          bufferTime;
+} SkStreamRequestInfo;
+
+typedef struct SkStreamInfo {
+  SkStreamType                      streamType;
+  SkAccessMode                      accessMode;
+  SkAccessType                      accessType;
+  SkFormat                          formatType;
+  uint32_t                          formatBits;   // Number of bits in the format
+  SkRangedValue                     periods;      // Number of periods
+  uint32_t                          channels;     // Number of channels in a sample
+  uint32_t                          sampleBits;   // Number of bits in a sample
+  SkRangedValue                     sampleTime;   // Time in microseconds of a sample
+  uint32_t                          periodSamples;// Number of utils in a period
+  uint32_t                          periodBits;   // Number of bits in a period
+  SkRangedValue                     periodTime;   // Time in microseconds of a period
+  uint32_t                          bufferSamples;// Number of utils in the back-buffer
+  uint32_t                          bufferBits;   // Number of bits in the back-buffer
+  SkRangedValue                     bufferTime;   // Time in microseconds in the back-buffer
+  SkRangedValue                     rate;
+  uint32_t                          latency;
+} SkStreamInfo;
 
 ////////////////////////////////////////////////////////////////////////////////
 // Standard Functions
@@ -229,6 +319,28 @@ SKAPI_ATTR void SKAPI_CALL skResolvePhysicalDevice(
   SkPhysicalDevice*                 pPhysicalDevice
 );
 
+SKAPI_ATTR SkResult SKAPI_CALL skRequestDefaultStream(
+  SkInstance                        instance,
+  SkStreamRequestInfo*              pStreamRequestInfo,
+  SkStream*                         pStream
+);
+
+SKAPI_ATTR SkResult SKAPI_CALL skGetStreamInfo(
+  SkStream                          stream,
+  SkStreamInfo*                     pStreamInfo
+);
+
+SKAPI_ATTR int64_t SKAPI_CALL skStreamWriteInterleaved(
+  SkStream                          stream,
+  void const*                       pBuffer,
+  uint32_t                          framesCount
+);
+
+SKAPI_ATTR void SKAPI_CALL skDestroyStream(
+  SkStream                          stream,
+  SkBool32                          drain
+);
+
 ////////////////////////////////////////////////////////////////////////////////
 // Extension: SK_SEA_device_polling
 ////////////////////////////////////////////////////////////////////////////////
@@ -263,4 +375,4 @@ SKAPI_ATTR SkResult SKAPI_CALL skRegisterDeviceCallbackSEA(
 }
 #endif // __cplusplus
 
-#endif // SELKIE_H
+#endif // OPENSK_H

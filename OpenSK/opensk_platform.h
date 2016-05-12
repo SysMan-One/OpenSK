@@ -1,10 +1,10 @@
 /*******************************************************************************
- * selkie - All content 2016 Trent Reed, all rights reserved.
+ * OpenSK - All content 2016 Trent Reed, all rights reserved.
  *------------------------------------------------------------------------------
- * SelKie standard include header. (Platform-specific header information)
+ * OpenSK standard include header. (Platform-specific header information)
  ******************************************************************************/
-#ifndef   SELKIE_PLATFORM_H
-#define   SELKIE_PLATFORM_H
+#ifndef   OPENSK_PLATFORM_H
+#define   OPENSK_PLATFORM_H
 
 #ifdef    __cplusplus
 extern "C" {
@@ -22,4 +22,4 @@ extern "C" {
 }
 #endif // __cplusplus
 
-#endif // SELKIE_PLATFORM_H
+#endif // OPENSK_PLATFORM_H
