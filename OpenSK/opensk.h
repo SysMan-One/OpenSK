@@ -55,9 +55,9 @@ typedef enum SkResult {
   SK_ERROR_EXTENSION_NOT_PRESENT,
   SK_ERROR_FAILED_QUERYING_DEVICE,
   SK_ERROR_FAILED_RESOLVING_DEVICE,
-  SK_ERROR_FAILED_STREAM_REQUEST,
-  SK_ERROR_INVALID_STREAM_REQUEST,
-  SK_ERROR_UNSUPPORTED_STREAM_REQUEST,
+  SK_ERROR_STREAM_REQUEST_FAILED,
+  SK_ERROR_STREAM_REQUEST_UNSUPPORTED,
+  SK_ERROR_STREAM_BUSY,
   SK_ERROR_FAILED_STREAM_WRITE,
   SK_ERROR_XRUN,
   SK_ERROR_NOT_IMPLEMENTED
@@ -95,8 +95,7 @@ typedef enum SkAccessType {
 
 typedef enum SkAccessMode {
   SK_ACCESS_MODE_BLOCK,
-  SK_ACCESS_MODE_NONBLOCK,
-  SK_ACCESS_MODE_ASYNC
+  SK_ACCESS_MODE_NONBLOCK
 } SkAccessMode;
 
 typedef enum SkFormat {
@@ -319,6 +318,18 @@ SKAPI_ATTR void SKAPI_CALL skResolvePhysicalDevice(
   SkPhysicalDevice*                 pPhysicalDevice
 );
 
+SKAPI_ATTR SkResult SKAPI_CALL skRequestPhysicalStream(
+  SkPhysicalComponent               physicalComponent,
+  SkStreamRequestInfo*              pStreamRequestInfo,
+  SkStream*                         pStream
+);
+
+SKAPI_ATTR SkResult SKAPI_CALL skRequestVirtualStream(
+  SkVirtualComponent                virtualComponent,
+  SkStreamRequestInfo*              pStreamRequestInfo,
+  SkStream*                         pStream
+);
+
 SKAPI_ATTR SkResult SKAPI_CALL skRequestDefaultStream(
   SkInstance                        instance,
   SkStreamRequestInfo*              pStreamRequestInfo,
@@ -333,6 +344,12 @@ SKAPI_ATTR SkResult SKAPI_CALL skGetStreamInfo(
 SKAPI_ATTR int64_t SKAPI_CALL skStreamWriteInterleaved(
   SkStream                          stream,
   void const*                       pBuffer,
+  uint32_t                          framesCount
+);
+
+SKAPI_ATTR int64_t SKAPI_CALL skStreamWriteNoninterleaved(
+  SkStream                          stream,
+  void const*const*                 pBuffer,
   uint32_t                          framesCount
 );
 

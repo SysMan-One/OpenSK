@@ -18,6 +18,13 @@
 ////////////////////////////////////////////////////////////////////////////////
 // Implementation Types
 ////////////////////////////////////////////////////////////////////////////////
+typedef union SkPfnFunctions {
+  snd_pcm_sframes_t (*readi_func)(snd_pcm_t *handle, void *buffer, snd_pcm_uframes_t size);
+  snd_pcm_sframes_t (*writei_func)(snd_pcm_t *handle, const void *buffer, snd_pcm_uframes_t size);
+  snd_pcm_sframes_t (*readn_func)(snd_pcm_t *handle, void **bufs, snd_pcm_uframes_t size);
+  snd_pcm_sframes_t (*writen_func)(snd_pcm_t *handle, void **bufs, snd_pcm_uframes_t size);
+} SkPfnFunctions;
+
 typedef struct SkLimitsContainer_IMPL {
   SkComponentLimits             capture;
   SkComponentLimits             playback;
@@ -35,6 +42,7 @@ typedef struct SkStream_T {
   SkInstance                    instance;
   SkStreamRequestInfo           requestInfo;
   SkStreamInfo                  streamInfo;
+  SkPfnFunctions                pfn;
 } SkStream_T;
 
 typedef struct SkPhysicalComponent_T {
@@ -113,12 +121,10 @@ typedef struct SkExtensionPropertiesInternal {
 ////////////////////////////////////////////////////////////////////////////////
 // Implementation Functions (Internal)
 ////////////////////////////////////////////////////////////////////////////////
-typedef union IntEndianCheck { uint32_t u32; unsigned char u8[4]; } IntEndianCheck;
-typedef union FloatEndianCheck { float f32; unsigned char u8[4]; } FloatEndianCheck;
-static IntEndianCheck intEndianCheck = { 1 };
-static FloatEndianCheck floatEndianCheck = { 1.0f };
-#define SK_INT_IS_BIGENDIAN() intEndianCheck.u8[0] == 1
-#define SK_FLOAT_IS_BIGENDIAN() floatEndianCheck.u8[0] != 0
+static union { uint32_t u32; unsigned char u8[4]; } intEndianCheck = { (uint32_t)0x01234567 };
+static union { float f32; unsigned char u8[4]; } floatEndianCheck = { (float)0x01234567 };
+#define SK_INT_IS_BIGENDIAN() intEndianCheck.u8[3] == 0x01
+#define SK_FLOAT_IS_BIGENDIAN() floatEndianCheck.u8[3] == 0x01
 
 snd_pcm_stream_t toLocalPcmStreamType(SkStreamType type) {
   switch (type) {
@@ -139,8 +145,6 @@ static int toLocalPcmAccessMode(SkAccessMode mode) {
       return 0;
     case SK_ACCESS_MODE_NONBLOCK:
       return SND_PCM_NONBLOCK;
-    case SK_ACCESS_MODE_ASYNC:
-      return SND_PCM_ASYNC;
   }
 }
 
@@ -1044,8 +1048,9 @@ SKAPI_ATTR void SKAPI_CALL skResolvePhysicalDevice(
   *pPhysicalDevice = physicalComponent->physicalDevice;
 }
 
-#define PCM_CHECK(call) if (call < 0) { snd_pcm_close(handle); return SK_ERROR_UNSUPPORTED_STREAM_REQUEST; }
-SKAPI_ATTR SkResult SKAPI_CALL skRequestDefaultStream(
+#define PCM_CHECK(call) if (call < 0) { return SK_ERROR_STREAM_REQUEST_UNSUPPORTED; }
+static SkResult skRequestStream(
+  snd_pcm_t*                        handle,
   SkInstance                        instance,
   SkStreamRequestInfo*              pStreamRequestInfo,
   SkStream*                         pStream
@@ -1056,31 +1061,6 @@ SKAPI_ATTR SkResult SKAPI_CALL skRequestDefaultStream(
   snd_pcm_access_t aValue;
   snd_pcm_format_t fValue;
   SkStreamInfo streamInfo;
-
-  // Check that it's one stream type
-  switch (pStreamRequestInfo->streamType) {
-    case SK_STREAM_TYPE_CAPTURE:
-    case SK_STREAM_TYPE_PLAYBACK:
-      break;
-    default:
-      return SK_ERROR_INVALID_STREAM_REQUEST;
-  }
-  switch (pStreamRequestInfo->accessMode) {
-    case SK_ACCESS_MODE_ASYNC:
-    case SK_ACCESS_MODE_NONBLOCK:
-    case SK_ACCESS_MODE_BLOCK:
-      break;
-    default:
-      return SK_ERROR_INVALID_STREAM_REQUEST;
-  }
-
-  int mode = toLocalPcmAccessMode(pStreamRequestInfo->accessMode);
-  snd_pcm_stream_t stream = toLocalPcmStreamType(pStreamRequestInfo->streamType);
-
-  snd_pcm_t *handle;
-  if (snd_pcm_open(&handle, "default", stream, mode) != 0) {
-    return SK_ERROR_FAILED_STREAM_REQUEST;
-  }
 
   snd_pcm_hw_params_t *hwParams;
   snd_pcm_hw_params_alloca(&hwParams);
@@ -1140,7 +1120,7 @@ SKAPI_ATTR SkResult SKAPI_CALL skRequestDefaultStream(
   int err = snd_pcm_hw_params(handle, hwParams);
   if (err < 0) {
     snd_pcm_close(handle);
-    return SK_ERROR_FAILED_STREAM_REQUEST;
+    return SK_ERROR_STREAM_REQUEST_FAILED;
   }
 
   // Gather the configuration space information
@@ -1186,9 +1166,109 @@ SKAPI_ATTR SkResult SKAPI_CALL skRequestDefaultStream(
   finalStream->pNext = instance->pStreams;
   finalStream->handle = handle;
   instance->pStreams = finalStream;
+
+  switch (streamInfo.streamType) {
+    case SK_STREAM_TYPE_CAPTURE:
+      switch (streamInfo.accessType) {
+        case SK_ACCESS_TYPE_INTERLEAVED:
+          finalStream->pfn.readi_func = &snd_pcm_readi;
+          break;
+        case SK_ACCESS_TYPE_NONINTERLEAVED:
+          finalStream->pfn.readn_func = &snd_pcm_readn;
+          break;
+        case SK_ACCESS_TYPE_MMAP_INTERLEAVED:
+          finalStream->pfn.readi_func = &snd_pcm_mmap_readi;
+          break;
+        case SK_ACCESS_TYPE_MMAP_NONINTERLEAVED:
+          finalStream->pfn.readn_func = &snd_pcm_mmap_readn;
+          break;
+        default:
+          break;
+      }
+      break;
+    case SK_STREAM_TYPE_PLAYBACK:
+      switch (streamInfo.accessType) {
+        case SK_ACCESS_TYPE_INTERLEAVED:
+          finalStream->pfn.writei_func = &snd_pcm_writei;
+          break;
+        case SK_ACCESS_TYPE_NONINTERLEAVED:
+          finalStream->pfn.writen_func = &snd_pcm_writen;
+          break;
+        case SK_ACCESS_TYPE_MMAP_INTERLEAVED:
+          finalStream->pfn.writei_func = &snd_pcm_mmap_writei;
+          break;
+        case SK_ACCESS_TYPE_MMAP_NONINTERLEAVED:
+          finalStream->pfn.writen_func = &snd_pcm_mmap_writen;
+          break;
+        default:
+          break;
+      }
+      break;
+  }
+
   *pStream = finalStream;
 
   return SK_SUCCESS;
+}
+
+SKAPI_ATTR SkResult SKAPI_CALL skRequestPhysicalStream(
+  SkPhysicalComponent               physicalComponent,
+  SkStreamRequestInfo*              pStreamRequestInfo,
+  SkStream*                         pStream
+) {
+  int err;
+  snd_pcm_t *handle;
+  int mode = toLocalPcmAccessMode(pStreamRequestInfo->accessMode);
+  snd_pcm_stream_t stream = toLocalPcmStreamType(pStreamRequestInfo->streamType);
+  if ((err = snd_pcm_open(&handle, physicalComponent->identifier, stream, mode)) != 0) {
+    if (err == -EBUSY) return SK_ERROR_STREAM_BUSY;
+    return SK_ERROR_STREAM_REQUEST_FAILED;
+  }
+  SkResult result = skRequestStream(handle, physicalComponent->physicalDevice->instance, pStreamRequestInfo, pStream);
+  if (result != SK_SUCCESS) {
+    snd_pcm_close(handle);
+  }
+  return result;
+}
+
+SKAPI_ATTR SkResult SKAPI_CALL skRequestVirtualStream(
+  SkVirtualComponent                virtualComponent,
+  SkStreamRequestInfo*              pStreamRequestInfo,
+  SkStream*                         pStream
+) {
+  int err;
+  snd_pcm_t *handle;
+  int mode = toLocalPcmAccessMode(pStreamRequestInfo->accessMode);
+  snd_pcm_stream_t stream = toLocalPcmStreamType(pStreamRequestInfo->streamType);
+  if ((err = snd_pcm_open(&handle, virtualComponent->properties.componentName, stream, mode)) != 0) {
+    if (err == -EBUSY) return SK_ERROR_STREAM_BUSY;
+    return SK_ERROR_STREAM_REQUEST_FAILED;
+  }
+  SkResult result = skRequestStream(handle, virtualComponent->virtualDevice->instance, pStreamRequestInfo, pStream);
+  if (result != SK_SUCCESS) {
+    snd_pcm_close(handle);
+  }
+  return result;
+}
+
+SKAPI_ATTR SkResult SKAPI_CALL skRequestDefaultStream(
+  SkInstance                        instance,
+  SkStreamRequestInfo*              pStreamRequestInfo,
+  SkStream*                         pStream
+) {
+  int err;
+  snd_pcm_t *handle;
+  int mode = toLocalPcmAccessMode(pStreamRequestInfo->accessMode);
+  snd_pcm_stream_t stream = toLocalPcmStreamType(pStreamRequestInfo->streamType);
+  if ((err = snd_pcm_open(&handle, "default", stream, mode)) != 0) {
+    if (err == -EBUSY) return SK_ERROR_STREAM_BUSY;
+    return SK_ERROR_STREAM_REQUEST_FAILED;
+  }
+  SkResult result = skRequestStream(handle, instance, pStreamRequestInfo, pStream);
+  if (result != SK_SUCCESS) {
+    snd_pcm_close(handle);
+  }
+  return result;
 }
 #undef PCM_CHECK
 
@@ -1236,7 +1316,7 @@ SKAPI_ATTR int64_t SKAPI_CALL skStreamWriteInterleaved(
 ) {
   snd_pcm_sframes_t err = 0;
   for (;;) {
-    if ((err = snd_pcm_writei(stream->handle, pBuffer, framesCount)) < 0) {
+    if ((err = stream->pfn.writei_func(stream->handle, pBuffer, framesCount)) < 0) {
       if (err == -EAGAIN) continue;
       if ((err = xrun_recovery(stream->handle, err)) < 0) {
         return -SK_ERROR_FAILED_STREAM_WRITE;
@@ -1248,6 +1328,24 @@ SKAPI_ATTR int64_t SKAPI_CALL skStreamWriteInterleaved(
   return err;
 }
 
+SKAPI_ATTR int64_t SKAPI_CALL skStreamWriteNoninterleaved(
+  SkStream                          stream,
+  void const*const*                 pBuffer,
+  uint32_t                          framesCount
+) {
+  snd_pcm_sframes_t err = 0;
+  for (;;) {
+    if ((err = stream->pfn.writen_func(stream->handle, (void**)pBuffer, framesCount)) < 0) {
+      if (err == -EAGAIN) continue;
+      if ((err = xrun_recovery(stream->handle, err)) < 0) {
+        return -SK_ERROR_FAILED_STREAM_WRITE;
+      }
+      continue;
+    }
+    break;
+  }
+  return err;
+}
 
 SKAPI_ATTR void SKAPI_CALL skDestroyStream(
     SkStream                          stream,

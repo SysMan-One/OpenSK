@@ -5,6 +5,7 @@
  ******************************************************************************/
 
 #include <OpenSK/opensk.h>
+#include <common/common.h>
 #include <stdlib.h> // malloc
 #include <stdio.h>  // fprintf
 #include <stdarg.h> // va_arg
@@ -57,31 +58,13 @@ static float intensity = 0.075f;
 static int frequencyCount = 0;
 static float *frequencies = NULL;
 static float (*wave)(float) = &sine;
+static char const* physicalDeviceName = NULL;
+static char const* virtualDeviceName = NULL;
+static char const* componentName = NULL;
 
-/*******************************************************************************
- * Helper Functions
- ******************************************************************************/
-// A helper function which checks param against each argument passed after.
-// Note: Don't forget to end with a NULL to signify the final possible param.
-static int
-checkOptions(char const *param, ...) {
-  int passing = 0;
-  va_list ap;
-
-  va_start(ap, param);
-  char const *cmp = va_arg(ap, char const*);
-  while (cmp != NULL)
-  {
-    if (strcmp(param, cmp) == 0) {
-      passing = 1;
-      break;
-    }
-    cmp = va_arg(ap, char const*);
-  }
-  va_end(ap);
-
-  return passing;
-}
+// Non-user settings:
+static SkPhysicalComponent physicalComponent = SK_NULL_HANDLE;
+static SkVirtualComponent virtualComponent = SK_NULL_HANDLE;
 
 /*******************************************************************************
  * Main Entry Point
@@ -94,7 +77,7 @@ main(int argc, char const *argv[]) {
   //////////////////////////////////////////////////////////////////////////////
   for (int idx = 1; idx < argc; ++idx) {
     char const *param = argv[idx];
-    if (checkOptions(param, "-d", "--duration", NULL)) {
+    if (genCheckOptions(param, "-d", "--duration", NULL)) {
       ++idx;
       if (idx >= argc) {
         fprintf(stderr, "Expected a duration after '%s' in parameter list!\n", param);
@@ -105,7 +88,7 @@ main(int argc, char const *argv[]) {
         return -1;
       }
     }
-    else if (checkOptions(param, "-i", "--intensity")) {
+    else if (genCheckOptions(param, "-i", "--intensity")) {
       ++idx;
       if (idx >= argc) {
         fprintf(stderr, "Expected a frequency after '%s' in parameter list!\n", param);
@@ -116,7 +99,7 @@ main(int argc, char const *argv[]) {
         return -1;
       }
     }
-    else if (checkOptions(param, "-w", "--wave", NULL)) {
+    else if (genCheckOptions(param, "-w", "--wave", NULL)) {
       ++idx;
       if (idx >= argc) {
         fprintf(stderr, "Expected a frequency after '%s' in parameter list!\n", param);
@@ -146,17 +129,59 @@ main(int argc, char const *argv[]) {
         return -1;
       }
     }
-    else if (checkOptions(param, "-h", "--help", NULL)) {
+    else if (genCheckOptions(param, "-p", "--physical-device", NULL)) {
+      ++idx;
+      if (idx >= argc) {
+        fprintf(stderr, "Expected a physical device number (or name) after '%s' in parameter list!\n", param);
+        return -1;
+      }
+      if (physicalDeviceName) {
+        fprintf(stderr, "Multiple physical devices provided, please only provide one device!\n");
+        return -1;
+      }
+      physicalDeviceName = argv[idx];
+    }
+    else if (genCheckOptions(param, "-v", "--virtual-device", NULL)) {
+      ++idx;
+      if (idx >= argc) {
+        fprintf(stderr, "Expected a virtual device number (or name) after '%s' in parameter list!\n", param);
+        return -1;
+      }
+      if (virtualDeviceName) {
+        fprintf(stderr, "Multiple virtual devices provided, please only provide one device!\n");
+        return -1;
+      }
+      virtualDeviceName = argv[idx];
+    }
+    else if (genCheckOptions(param, "-c", "--component", NULL)) {
+      ++idx;
+      if (idx >= argc) {
+        fprintf(stderr, "Expected a component number (or name) after '%s' in parameter list!\n", param);
+        return -1;
+      }
+      if (componentName) {
+        fprintf(stderr, "Multiple components provided, please only provide one component!\n");
+        return -1;
+      }
+      componentName = argv[idx];
+    }
+    else if (genCheckOptions(param, "-h", "--help", NULL)) {
       printf(
-        "Usage: freq [frequencies] [options]\n"
+        "Usage: skfreq [options] [frequencies...]\n"
         "Options:\n"
-        "  -h, --help       Prints this help documentation.\n"
-        "  -d, --duration   Parses the next argument as a float, for note duration.\n"
-        "                   (Default: 1.0f - One second)\n"
-        "  -w, --wave       Parses the next argument, uses that as the wave type.\n"
-        "                   (Default: sine) (Options: sine, square, triangle, saw)\n"
-        "  -i, --intensity  Parses the next argument as a float, for note intensity.\n"
-        "                   (Default: 0.25f)\n"
+        "  -h, --help            Prints this help documentation.\n"
+        "  -p, --physical-device Either an integer for physical device index, or the device's name.\n"
+        "  -v, --virtual-device  Either an integer for virtual device index, or the device's name.\n"
+        "  -c, --component       Either an integer for component index, or the component's name.\n"
+        "  -d, --duration        Parses the next argument as a float, for note duration.\n"
+        "                        (Default: 1.0f - One second)\n"
+        "  -w, --wave            Parses the next argument, uses that as the wave type.\n"
+        "                        (Default: sine) (Options: sine, square, triangle, saw)\n"
+        "  -i, --intensity       Parses the next argument as a float, for note intensity.\n"
+        "                        (Default: 0.25f)\n"
+        "\n"
+        "Options such as -p, -v, and -c are optional, if no device/component is provided then\n"
+        " the default stream will be used in place of a specific device/component.\n"
       );
       return 0;
     }
@@ -184,12 +209,28 @@ main(int argc, char const *argv[]) {
     return -1;
   }
 
+  // Check that if a component is named, a device is also named.
+  if (componentName) {
+    if (!physicalDeviceName && !virtualDeviceName) {
+      fprintf(stderr, "A device must be provided along with a component.\n");
+      return -1;
+    }
+  }
+
+  // Check that if a device is named, a component is also named.
+  if (physicalDeviceName || virtualDeviceName) {
+    if (!componentName) {
+      fprintf(stderr, "A component must be provided along with a device.\n");
+      return -1;
+    }
+  }
+
   //////////////////////////////////////////////////////////////////////////////
   // Create OpenSK instance.
   //////////////////////////////////////////////////////////////////////////////
   SkResult result;
   SkApplicationInfo applicationInfo;
-  applicationInfo.pApplicationName = "freq";
+  applicationInfo.pApplicationName = "skfreq";
   applicationInfo.pEngineName = "opensk";
   applicationInfo.applicationVersion = 1;
   applicationInfo.engineVersion = 1;
@@ -204,28 +245,53 @@ main(int argc, char const *argv[]) {
   SkInstance instance;
   result = skCreateInstance(&instanceInfo, NULL, &instance);
   if (result != SK_SUCCESS) {
-    printf("Failed to create SelKie instance: %d\n", result);
-    abort();
+    printf("Failed to create OpenSK instance: %d\n", result);
+    return -1;
+  }
+
+  if (physicalDeviceName) {
+    physicalComponent = devResolvePhysicalComponent(instance, physicalDeviceName, componentName);
+    if (physicalComponent == SK_NULL_HANDLE) {
+      fprintf(stderr, "Failed to resolve requested physical component.\n");
+      return -1;
+    }
+  }
+  else if (virtualDeviceName) {
+    virtualComponent = devResolveVirtualComponent(instance, virtualDeviceName, componentName);
+    if (virtualComponent == SK_NULL_HANDLE) {
+      fprintf(stderr, "Failed to resolve requested virtual component.\n");
+      return -1;
+    }
   }
 
   //////////////////////////////////////////////////////////////////////////////
   // Construct a default output stream - uses the best available stream.
   //////////////////////////////////////////////////////////////////////////////
-  SkStreamRequestInfo streamRequest;
-  memset(&streamRequest, 0, sizeof(SkStreamRequestInfo)); // Clear the request (important!)
-  streamRequest.streamType  = SK_STREAM_TYPE_PLAYBACK;    // We want to play sound...
-  streamRequest.accessMode  = SK_ACCESS_MODE_BLOCK;       // We want the device to block...
-  streamRequest.accessType  = SK_ACCESS_TYPE_INTERLEAVED; // We want to pass interleaved data...
-  streamRequest.formatType  = SK_FORMAT_FLOAT;            // We want the audio unit to be float...
-  streamRequest.channels    = 2;                          // We want two channels (Left/Right)...
-  streamRequest.rate        = 44100;                      // We want it to be 44.1kHz (CD quality)...
+  SkStreamRequestInfo requestInfo;
+  memset(&requestInfo, 0, sizeof(SkStreamRequestInfo)); // Clear the request (important!)
+  requestInfo.streamType  = SK_STREAM_TYPE_PLAYBACK;    // We want to play sound...
+  requestInfo.accessMode  = SK_ACCESS_MODE_BLOCK;       // We want the device to block...
+  requestInfo.accessType  = SK_ACCESS_TYPE_INTERLEAVED; // We want to pass interleaved data...
+  requestInfo.formatType  = SK_FORMAT_FLOAT;            // We want the audio unit to be float...
+  requestInfo.channels    = 2;                          // We want two channels (Left/Right)...
+  requestInfo.rate        = 44100;                      // We want it to be 44.1kHz (CD quality)...
 
   SkStream outputStream;
   SkStreamInfo streamInfo;
-  result = skRequestDefaultStream(instance, &streamRequest, &outputStream);
+  result = devOpenOneOf(instance, physicalComponent, virtualComponent, &requestInfo, &outputStream);
   if (result != SK_SUCCESS) {
-    fprintf(stderr, "Failed to request the default stream: %d\n", result);
-    abort();
+    switch (result) {
+      case SK_ERROR_STREAM_BUSY:
+        fprintf(stderr, "The requested playback stream is busy, and cannot be acquired.\n");
+        break;
+      case SK_ERROR_STREAM_REQUEST_UNSUPPORTED:
+        fprintf(stderr, "The requested playback stream does not support the required configuration.\n");
+        break;
+      case SK_ERROR_STREAM_REQUEST_FAILED:
+        fprintf(stderr, "The requested playback stream could not be acquired for unknown reasons.\n");
+        break;
+    }
+    return 1;
   }
   skGetStreamInfo(outputStream, &streamInfo);
 
