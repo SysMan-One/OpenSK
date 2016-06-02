@@ -21,7 +21,11 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 ################################################################################
 # Options
 ################################################################################
-option(OPENSK_COMPILE_UTILITIES "Whether or not to compile utilities." ON)
+option(OPENSK_UTILS_COLORS "Whether or not to compile utilities with color support." ON)
+
+if(OPENSK_UTILS_COLORS)
+  add_definitions(-DOPENSK_UTILS_COLORS)
+endif()
 
 ################################################################################
 # Packages
@@ -35,14 +39,49 @@ find_package(UDev)
 include_directories(${ALSA_INCLUDE_DIRS} ${UDEV_INCLUDE_DIRS})
 add_library(sk
   OpenSK/opensk.h
+  OpenSK/opensk.c
   OpenSK/opensk_platform.h
-  OpenSK/opensk_alsa.c
-)
-target_link_libraries(sk
-  ${ALSA_LIBRARIES}
-  ${UDEV_LIBRARIES}
+  OpenSK/dev/hosts.h
 )
 
-if(OPENSK_COMPILE_UTILITIES)
-  add_subdirectory(utils)
+if(ALSA_FOUND)
+  add_definitions(-DHOST_ALSA)
+  target_sources(sk PRIVATE OpenSK/host/alsa.c)
+  target_link_libraries(sk ${ALSA_LIBRARIES})
 endif()
+if(UDEV_FOUND)
+  add_definitions(-DPLUGIN_UDEV)
+  target_link_libraries(sk ${UDEV_LIBRARIES})
+endif()
+
+add_library(skx
+  OpenSK/ext/utils.h
+  OpenSK/ext/utils.c
+)
+add_subdirectory(utils)
+
+################################################################################
+# CPack
+################################################################################
+install(
+  FILES
+    OpenSK/opensk.h
+    OpenSK/opensk_platform.h
+    OpenSK/ext/utils.h
+  DESTINATION include
+)
+install(
+  TARGETS sk skx
+  ARCHIVE DESTINATION lib
+)
+include(InstallRequiredSystemLibraries)
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "The low-level cross-platform stream kit.")
+set(CPACK_PACKAGE_VENDOR "Trent Reed")
+set(CPACK_PACKAGE_DESCRIPTION_FILE "${CMAKE_SOURCE_DIR}/README.md")
+set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_SOURCE_DIR}/LICENSE")
+set(CPACK_PACKAGE_VERSION_MAJOR "0")
+set(CPACK_PACKAGE_VERSION_MINOR "0")
+set(CPACK_PACKAGE_VERSION_PATCH "6")
+set(CPACK_PACKAGE_INSTALL_DIRECTORY "OpenSK-0.0.6")
+set(CPACK_PACKAGE_CONTACT "Trent Reed <me@trentreed.net>")
+include(CPack)

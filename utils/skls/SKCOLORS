@@ -1,0 +1,32 @@
+################################################################################
+# Default color configuration for all OpenSK Utilities
+# Resolved in the following order (each file overrides settings):
+# 1. {pwd}/SKCOLORS
+# 2. {pwd}/SKCOLORS.$TERM
+# 3. $HOME/.skcolors
+# 4. $HOME/.skcolors.$TERM
+################################################################################
+# Here are the symbolic color names, latest valid color is used for a symbol.
+# NORMAL := The default color to reset to.
+# HOSTAPI := The default color for an SkHostApi.
+# HOSTAPI(?) := Replace "?" with the long-form API capabilities, * means any.
+# DEVICE := The default color for any Sk*Device type.
+# DEVICE(?) := Replace "?" with the long-form API capabilities, * means any.
+# PDEVICE := The default color for an SkPhysicalDevice.
+# PDEVICE(?) := Replace "?" with the long-form API capabilities, * means any.
+# VDEVICE := The default color for an SkVirtualDevice.
+# VDEVICE(?) := Replace "?" with the long-form API capabilities, * means any.
+# COMPONENT := The default color for any Sk*Component type.
+# COMPONENT(?) := Replace "?" with the long-form API capabilities, * means any.
+# PCOMPONENT := The default color for an SkPhysicalComponent.
+# PCOMPONENT(?) := Replace "?" with the long-form API capabilities, * means any.
+# VCOMPONENT := The default color for an SkVirtualComponent.
+# VCOMPONENT(?) := Replace "?" with the long-form API capabilities, * means any.
+################################################################################
+NORMAL 00
+HOSTAPI 01;34       # Provide a default color scheme for HOSTAPI types.
+HOSTAPI(*---) 01;31 # Specifically, types without functionality are red.
+PDEVICE 01;32       # All physical devices are printed in a bold green color.
+VDEVICE 01;34       # All virtual devices are printed in a bold blue color.
+PCOMPONENT 32       # All physical components are green, but not bold.
+VCOMPONENT 34       # All virtual components are blue, but not bold.
