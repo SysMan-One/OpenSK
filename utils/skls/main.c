@@ -308,7 +308,7 @@ printlong_component(Display *display, DisplayItem *item) {
   SkComponentProperties properties;
   char capabilities[] = "----\0";
 
-  skGetComponentProperties((SkObject)item->data, &properties);
+  skGetComponentProperties((SkComponent)item->data, &properties);
   printf("%s . %-*s ", capabilities, display->extraSpacing[0], ".");
   printItem(display, item, display->maxLength);
   printf(" %s\n", properties.componentName);
@@ -319,7 +319,7 @@ printlong_device(Display *display, DisplayItem *item) {
   SkDeviceProperties properties;
   char capabilities[] = "----\0";
 
-  skGetDeviceProperties((SkObject)item->data, &properties);
+  skGetDeviceProperties((SkDevice)item->data, &properties);
   printf("%s 1 %-*d ", capabilities, display->extraSpacing[0], properties.componentCount);
   printItem(display, item, display->maxLength);
   printf(" %s (%s, %s)\n", properties.deviceName, properties.driverName, properties.mixerName);
@@ -338,12 +338,10 @@ printlong(Display *display, DisplayItem *items, size_t itemCount) {
       case SK_OBJECT_TYPE_HOST_API:
         printlong_host(display, &items[idx]);
         break;
-      case SK_OBJECT_TYPE_PHYSICAL_DEVICE:
-      case SK_OBJECT_TYPE_VIRTUAL_DEVICE:
+      case SK_OBJECT_TYPE_DEVICE:
         printlong_device(display, &items[idx]);
         break;
-      case SK_OBJECT_TYPE_PHYSICAL_COMPONENT:
-      case SK_OBJECT_TYPE_VIRTUAL_COMPONENT:
+      case SK_OBJECT_TYPE_COMPONENT:
         printlong_component(display, &items[idx]);
         break;
       default:
@@ -442,7 +440,7 @@ displayLimits(Display* display, SkComponentLimits* limits) {
 
 #define PRINT_ENUM(e,v) if (e & v) { fputs(#v "\n", stdout); }
 static int
-displayComponent(Display* display, SkObject component) {
+displayComponent(Display* display, SkComponent component) {
   SkResult result;
   SkStreamType streamType;
   SkComponentLimits limits;
@@ -454,7 +452,7 @@ displayComponent(Display* display, SkObject component) {
   }
   fputc('\n', stdout);
 
-  for (streamType = SK_STREAM_TYPE_BEGIN; streamType <= SK_STREAM_TYPE_END; streamType <<= 1) {
+  for (streamType = SK_STREAM_TYPE_BEGIN; streamType != SK_STREAM_TYPE_END; streamType <<= 1) {
     if (properties.supportedStreams & streamType) {
       result = skGetComponentLimits(component, streamType, &limits);
       if (result != SK_SUCCESS) {
@@ -470,10 +468,11 @@ displayComponent(Display* display, SkObject component) {
 #undef PRINT_ENUM
 
 static int
-displayDevices(Display* display, SkObject *devices, uint32_t deviceCount) {
+displayDevices(Display* display, SkDevice *devices, uint32_t deviceCount) {
   uint32_t idx;
   SkResult result;
-  SkObject *components;
+  SkComponent *components;
+  SkColorKindUTL colorKind;
   uint32_t componentCount;
   uint32_t totalComponentCount;
   uint32_t objectCount;
@@ -494,7 +493,7 @@ displayDevices(Display* display, SkObject *devices, uint32_t deviceCount) {
     if (result != SK_SUCCESS) {
       ERR("Failed to query the number of components available on the device.\n");
     }
-    components = realloc(components, sizeof(SkObject) * (totalComponentCount + componentCount));
+    components = realloc(components, sizeof(SkComponent) * (totalComponentCount + componentCount));
     if (!components) {
       ERR("Failed to allocate enough information to store components!\n");
     }
@@ -512,18 +511,9 @@ displayDevices(Display* display, SkObject *devices, uint32_t deviceCount) {
   for (idx = 0; idx < deviceCount; ++idx) {
     item = &items[idx];
     item->data = devices[idx];
-    switch (skGetObjectType(devices[idx])) {
-      case SK_OBJECT_TYPE_PHYSICAL_DEVICE:
-        skGetPhysicalDeviceProperties((SkPhysicalDevice)devices[idx], &deviceProperties);
-        colorCode = skGetColorCodeUTL(display->colorDatabase, deviceProperties.identifier, SKUTL_COLOR_KIND_PHYSICAL_DEVICE);
-        break;
-      case SK_OBJECT_TYPE_VIRTUAL_DEVICE:
-        skGetVirtualDeviceProperties((SkVirtualDevice)devices[idx], &deviceProperties);
-        colorCode = skGetColorCodeUTL(display->colorDatabase, deviceProperties.identifier, SKUTL_COLOR_KIND_VIRTUAL_DEVICE);
-        break;
-      default:
-        ERR("Invalid object returned when printing devices.\n");
-    }
+    skGetDeviceProperties(devices[idx], &deviceProperties);
+    colorKind = (deviceProperties.isPhysical) ? SKUTL_COLOR_KIND_PHYSICAL_DEVICE : SKUTL_COLOR_KIND_VIRTUAL_DEVICE;
+    colorCode = skGetColorCodeUTL(display->colorDatabase, deviceProperties.identifier, colorKind);
     skStringCopyUTL(item->displayName, deviceProperties.identifier);
     if (colorCode) {
       skStringCopyUTL(item->colorCode, colorCode);
@@ -541,18 +531,9 @@ displayDevices(Display* display, SkObject *devices, uint32_t deviceCount) {
   for (idx = 0; idx < totalComponentCount; ++idx) {
     item = &items[idx + deviceCount];
     item->data = components[idx];
-    switch (skGetObjectType(components[idx])) {
-      case SK_OBJECT_TYPE_PHYSICAL_COMPONENT:
-        skGetPhysicalComponentProperties((SkPhysicalComponent)components[idx], &componentProperties);
-        colorCode = skGetColorCodeUTL(display->colorDatabase, componentProperties.identifier, SKUTL_COLOR_KIND_PHYSICAL_COMPONENT);
-        break;
-      case SK_OBJECT_TYPE_VIRTUAL_COMPONENT:
-        skGetVirtualComponentProperties((SkVirtualComponent)components[idx], &componentProperties);
-        colorCode = skGetColorCodeUTL(display->colorDatabase, componentProperties.identifier, SKUTL_COLOR_KIND_VIRTUAL_COMPONENT);
-        break;
-      default:
-        ERR("Invalid object returned when printing components.\n");
-    }
+    skGetComponentProperties(components[idx], &componentProperties);
+    colorKind = (componentProperties.isPhysical) ? SKUTL_COLOR_KIND_PHYSICAL_COMPONENT : SKUTL_COLOR_KIND_VIRTUAL_COMPONENT;
+    colorCode = skGetColorCodeUTL(display->colorDatabase, deviceProperties.identifier, colorKind);
     skStringCopyUTL(item->displayName, componentProperties.identifier);
     if (colorCode) {
       skStringCopyUTL(item->colorCode, colorCode);
@@ -578,7 +559,7 @@ displayDevices(Display* display, SkObject *devices, uint32_t deviceCount) {
 static int
 displayHostApi(Display* display, SkHostApi hostApi) {
   SkResult result;
-  SkObject*devices;
+  SkDevice*devices;
   uint32_t physicalDeviceCount;
   uint32_t virtualDeviceCount;
   int retVal;
@@ -591,11 +572,11 @@ displayHostApi(Display* display, SkHostApi hostApi) {
     if (result != SK_SUCCESS) {
       ERR("Failed to query the number of physical devices available on the Host API.\n");
     }
-    devices = realloc(devices, sizeof(SkObject) * physicalDeviceCount);
+    devices = realloc(devices, sizeof(SkDevice) * physicalDeviceCount);
     if (!devices) {
       ERR("Failed to allocate enough information to store physical devices!\n");
     }
-    result = skEnumeratePhysicalDevices(hostApi, &physicalDeviceCount, (SkPhysicalDevice*)devices);
+    result = skEnumeratePhysicalDevices(hostApi, &physicalDeviceCount, devices);
     if (result != SK_SUCCESS) {
       ERR("Failed to acquire the physical devices available on the Host API.\n");
     }
@@ -606,11 +587,11 @@ displayHostApi(Display* display, SkHostApi hostApi) {
     if (result != SK_SUCCESS) {
       ERR("Failed to query the number of virtual devices available on the Host API.\n");
     }
-    devices = realloc(devices, sizeof(SkObject) * (physicalDeviceCount + virtualDeviceCount));
+    devices = realloc(devices, sizeof(SkDevice) * (physicalDeviceCount + virtualDeviceCount));
     if (!devices) {
       ERR("Failed to allocate enough information to store virtual devices!\n");
     }
-    result = skEnumerateVirtualDevices(hostApi, &virtualDeviceCount, (SkVirtualDevice*)&devices[physicalDeviceCount]);
+    result = skEnumerateVirtualDevices(hostApi, &virtualDeviceCount, &devices[physicalDeviceCount]);
     if (result != SK_SUCCESS) {
       ERR("Failed to acquire the virtual devices available on the Host API.\n");
     }
@@ -644,7 +625,15 @@ displayInstance(Display *display, SkInstance instance) {
   SkHostApiProperties properties;
   DisplayItem* items = calloc(hostCount, sizeof(DisplayItem));
   for (uint32_t idx = 0; idx < hostCount; ++idx) {
+
+    // Refresh the API (populate devices)
+    result = skScanDevices(hostApi[idx]);
+    if (result != SK_SUCCESS) {
+      ERR("Failed to refresh device list on the host API.\n");
+    }
     skGetHostApiProperties(hostApi[idx], &properties);
+
+    // Count number of devices
     decimalCount = 0;
     totalObjects = 0;
     if (display->f_devices) {
@@ -656,6 +645,8 @@ displayInstance(Display *display, SkInstance instance) {
       totalObjects /= 10;
     }
     if (decimalCount > display->extraSpacing[0]) display->extraSpacing[0] = decimalCount;
+
+    // Count number of components
     decimalCount = 0;
     totalObjects = 0;
     if (display->f_components) {
@@ -667,6 +658,8 @@ displayInstance(Display *display, SkInstance instance) {
       totalObjects /= 10;
     }
     if (decimalCount > display->extraSpacing[1]) display->extraSpacing[1] = decimalCount;
+
+    // Configure the DisplayItem
     items[idx].data = hostApi[idx];
     skStringCopyUTL(items[idx].displayName, properties.identifier);
     colorCode = skGetColorCodeUTL(display->colorDatabase, properties.identifier, SKUTL_COLOR_KIND_HOSTAPI + properties.capabilities);
@@ -694,12 +687,10 @@ printStructure(char const* path, Display* display, SkObject object) {
       return displayInstance(display, (SkInstance)object);
     case SK_OBJECT_TYPE_HOST_API:
       return displayHostApi(display, (SkHostApi)object);
-    case SK_OBJECT_TYPE_PHYSICAL_DEVICE:
-    case SK_OBJECT_TYPE_VIRTUAL_DEVICE:
-      return displayDevices(display, &object, 1);
-    case SK_OBJECT_TYPE_PHYSICAL_COMPONENT:
-    case SK_OBJECT_TYPE_VIRTUAL_COMPONENT:
-      return displayComponent(display, object);
+    case SK_OBJECT_TYPE_DEVICE:
+      return displayDevices(display, (SkDevice*)&object, 1);
+    case SK_OBJECT_TYPE_COMPONENT:
+      return displayComponent(display, (SkComponent)object);
     default:
       ERR("Handle was resolved, but type is not supported by skls.\n");
   }
@@ -915,7 +906,7 @@ int main(int argc, char const *argv[]) {
   applicationInfo.apiVersion = SK_API_VERSION_0_0;
 
   SkInstanceCreateInfo instanceInfo;
-  instanceInfo.flags = SK_INSTANCE_REFRESH_ON_CREATE;
+  instanceInfo.flags = SK_INSTANCE_DEFAULT;
   instanceInfo.pApplicationInfo = &applicationInfo;
   instanceInfo.enabledExtensionCount = 0;
   instanceInfo.ppEnabledExtensionNames = NULL;

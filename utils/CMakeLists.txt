@@ -10,8 +10,11 @@ find_library(M_LIB m)
 add_executable(skls skls/main.c)
 target_link_libraries(skls sk skx)
 
+add_executable(skdd skdd/main.c)
+target_link_libraries(skdd sk skx)
+
 install(
-  TARGETS skls
+  TARGETS skls skdd
   RUNTIME DESTINATION bin
 )
 install(

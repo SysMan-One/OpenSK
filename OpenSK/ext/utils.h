@@ -26,6 +26,9 @@ char const* skGetTerminalNameUTL();
 int _skCheckParamUTL(char const* param, ...);
 int _skCheckParamBeginsUTL(char const* param, ...);
 
+SkBool32 skCStrCompareUTL(char const *lhs, char const *rhs);
+SkBool32 skCStrCompareCaseInsensitiveUTL(char const *lhs, char const *rhs);
+
 ////////////////////////////////////////////////////////////////////////////////
 // Utility: Color Kind
 ////////////////////////////////////////////////////////////////////////////////
@@ -94,6 +97,16 @@ SkBool32 skStringNCopyUTL(
 SkBool32 skStringCopyUTL(
   SkStringUTL                 string,
   char const*                 str
+);
+
+SkBool32 skStringAppendUTL(
+  SkStringUTL                 string,
+  char const*                 str
+);
+
+void skStringSwapUTL(
+  SkStringUTL                 stringA,
+  SkStringUTL                 stringB
 );
 
 char const* skStringDataUTL(

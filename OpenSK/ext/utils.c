@@ -24,8 +24,8 @@
 ////////////////////////////////////////////////////////////////////////////////
 static SkResult
 skExpandEnvironmentIMPL(
-    char const*                 patternName,
-    char*                       pBuffer
+  char const*                 patternName,
+  char*                       pBuffer
 ) {
   ptrdiff_t expansionSize;
   char const *expansion;
@@ -133,6 +133,30 @@ _skCheckParamBeginsUTL(char const *param, ...) {
   va_end(ap);
 
   return passing;
+}
+
+SkBool32
+skCStrCompareUTL(
+  char const *lhs,
+  char const *rhs
+) {
+  while (*lhs && *rhs && *lhs == *rhs) {
+    ++lhs;
+    ++rhs;
+  }
+  return (*lhs == *rhs) ? SK_TRUE : SK_FALSE;
+}
+
+SkBool32
+skCStrCompareCaseInsensitiveUTL(
+  char const *lhs,
+  char const *rhs
+) {
+  while (*lhs && *rhs && tolower(*lhs) == tolower(*rhs)) {
+    ++lhs;
+    ++rhs;
+  }
+  return (*lhs == *rhs) ? SK_TRUE : SK_FALSE;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -494,6 +518,31 @@ SkBool32 skStringCopyUTL(
   char const*                 str
 ) {
   return skStringNCopyUTL(string, str, strlen(str));
+}
+
+SkBool32 skStringAppendUTL(
+  SkStringUTL                 string,
+  char const*                 str
+) {
+  size_t total;
+  SkBool32 result;
+  total = skStringLengthUTL(string) + strlen(str);
+  result = skStringResizeUTL(string, total + 1);
+  if (result != SK_TRUE) {
+    return SK_FALSE;
+  }
+  strcpy((char*)&skStringDataUTL(string)[skStringLengthUTL(string)], str);
+  return SK_TRUE;
+}
+
+void skStringSwapUTL(
+  SkStringUTL                 stringA,
+  SkStringUTL                 stringB
+) {
+  SkStringUTL stringC;
+  memcpy(stringC, stringA, sizeof(SkStringUTL));
+  memcpy(stringA, stringB, sizeof(SkStringUTL));
+  memcpy(stringB, stringC, sizeof(SkStringUTL));
 }
 
 char const* skStringDataUTL(

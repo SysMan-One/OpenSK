@@ -5,6 +5,7 @@
  ******************************************************************************/
 
 #include "opensk.h"
+#include "dev/assert.h"
 #include "dev/hosts.h"
 #include "dev/macros.h"
 #include <stdlib.h>
@@ -153,26 +154,296 @@ skGenerateObjectIdentifierIMPL(char *buffer, char const *prefix, uint32_t number
 }
 
 SKAPI_ATTR SkResult SKAPI_CALL
-skGenerateObjectIdentifier(char *identifier, SkObject object, uint32_t number) {
-  switch (skGetObjectType(object)) {
-    case SK_OBJECT_TYPE_PHYSICAL_DEVICE:
-      return skGenerateObjectIdentifierIMPL(identifier, "pd", number);
-    case SK_OBJECT_TYPE_VIRTUAL_DEVICE:
-      return skGenerateObjectIdentifierIMPL(identifier, "vd", number);
-    case SK_OBJECT_TYPE_PHYSICAL_COMPONENT:
-      strcpy(identifier, ((SkPhysicalComponent)object)->physicalDevice->properties.identifier);
-      itoa(&identifier[strlen(identifier)], number);
-      break;
-    case SK_OBJECT_TYPE_VIRTUAL_COMPONENT:
-      strcpy(identifier, ((SkVirtualComponent)object)->virtualDevice->properties.identifier);
-      itoa(&identifier[strlen(identifier)], number);
-      break;
-    default:
-      return SK_ERROR_INITIALIZATION_FAILED;
+skGenerateDeviceIdentifier(char *identifier, SkDevice device) {
+  uint32_t count;
+  SkDevice countDevice;
+  SKASSERT(identifier != NULL, "Must have a location to write the identifier to.\n");
+  SKASSERT(device != NULL, "Must have a device to generate an identifier for.\n");
+  SKASSERT(device->hostApi, "hostAPI must be set on the device to generate an identifier.\n");
+  SKASSERT(
+    device->properties.isPhysical == SK_TRUE || device->properties.isPhysical == SK_FALSE,
+    "The device isPhysical flag must be set to either SK_TRUE or SK_FALSE.\n"
+  );
+
+  // Count the number of existing devices
+  count = 0;
+  countDevice = device->hostApi->pDevices;
+  while (countDevice) {
+    SKASSERT(countDevice != device, "The identifier must be generated prior to adding the device to the host.\n");
+    if (countDevice->properties.isPhysical == device->properties.isPhysical) {
+      ++count;
+    }
+    countDevice = countDevice->pNext;
   }
+
+  return skGenerateObjectIdentifierIMPL(identifier, (device->properties.isPhysical) ? "pd" : "vd", count);
+}
+
+SKAPI_ATTR SkResult SKAPI_CALL
+skGenerateComponentIdentifier(char *identifier, SkComponent component) {
+  uint32_t count;
+  SkComponent countComponent;
+  SKASSERT(identifier != NULL, "Must have a location to write the identifier to.\n");
+  SKASSERT(component != NULL, "Must have a component to generate an identifier for.\n");
+  SKASSERT(component->device, "device must be set on the component to generate an identifier.\n");
+  SKASSERT(
+    strlen(component->device->properties.identifier) > 0,
+    "The component's device must have already had it's identifier generated.\n"
+  );
+
+  // Count the number of existing components
+  count = 0;
+  countComponent = component->device->pComponents;
+  while (countComponent) {
+    SKASSERT(countComponent != component, "The identifier must be generated prior to adding the component to the device.\n");
+    ++count;
+    countComponent = countComponent->pNext;
+  }
+
+  // This can't fail, just assign the device's identifier and then add the count
+  strcpy(identifier, component->device->properties.identifier);
+  itoa(&identifier[strlen(identifier)], count);
   return SK_SUCCESS;
 }
 
+SKAPI_ATTR SkResult SKAPI_CALL
+skConstructHostApi(SkInstance instance, size_t hostApiSize, const SkAllocationCallbacks* pAllocator, SkHostApi* pHostApi) {
+  SkHostApi hostApi;
+
+  // Allocate the hostApi
+  hostApi = SKALLOC(hostApiSize, SK_SYSTEM_ALLOCATION_SCOPE_HOST_API);
+  if (!hostApi) {
+    return SK_ERROR_OUT_OF_HOST_MEMORY;
+  }
+
+  // Fill in the HostApi external information
+  memset(hostApi, 0, hostApiSize);
+  hostApi->objectType = SK_OBJECT_TYPE_HOST_API;
+  hostApi->instance = instance;
+
+  // Add to the instance
+  hostApi->pNext = instance->hostApi;
+  instance->hostApi = hostApi;
+
+  *pHostApi = hostApi;
+  return SK_SUCCESS;
+}
+
+SKAPI_ATTR SkResult SKAPI_CALL
+skConstructDevice(SkHostApi hostApi, size_t deviceSize, SkBool32 isPhysical, const SkAllocationCallbacks* pAllocator, SkDevice *pDevice) {
+  SkResult result;
+  SkDevice device;
+
+  // Allocate the device
+  device = SKALLOC(deviceSize, SK_SYSTEM_ALLOCATION_SCOPE_DEVICE);
+  if (!device) {
+    return SK_ERROR_OUT_OF_HOST_MEMORY;
+  }
+
+  // Fill in the OpenSK external information
+  memset(device, 0, deviceSize);
+  device->objectType = SK_OBJECT_TYPE_DEVICE;
+  device->hostApi = hostApi;
+  device->properties.isPhysical = isPhysical;
+  result = skGenerateDeviceIdentifier(device->properties.identifier, device);
+  if (result != SK_SUCCESS) {
+    SKFREE(device);
+    return result;
+  }
+
+  // Add to the hostApi
+  device->pNext = hostApi->pDevices;
+  hostApi->pDevices = device;
+
+  *pDevice = device;
+  return SK_SUCCESS;
+}
+
+SKAPI_ATTR SkResult SKAPI_CALL
+skConstructComponent(SkDevice device, size_t componentSize, const SkAllocationCallbacks* pAllocator, SkComponent *pComponent) {
+  SkResult result;
+  SkComponent component;
+
+  // Allocate the component
+  component = SKALLOC(componentSize, SK_SYSTEM_ALLOCATION_SCOPE_DEVICE);
+  if (!component) {
+    return SK_ERROR_OUT_OF_HOST_MEMORY;
+  }
+
+  // Fill in the OpenSK external information
+  memset(component, 0, componentSize);
+  component->objectType = SK_OBJECT_TYPE_COMPONENT;
+  component->device = device;
+  result = skGenerateComponentIdentifier(component->properties.identifier, component);
+  if (result != SK_SUCCESS) {
+    SKFREE(component);
+    return result;
+  }
+
+  // Add to the device
+  component->pNext = device->pComponents;
+  device->pComponents = component;
+
+  *pComponent = component;
+  return SK_SUCCESS;
+}
+
+SKAPI_ATTR SkResult SKAPI_CALL skConstructStream(
+  SkComponent                   component,
+  size_t                        streamSize,
+  const SkAllocationCallbacks*  pAllocator,
+  SkStream*                     pStream
+) {
+  SkResult result;
+  SkStream stream;
+
+  // Allocate the device
+  stream = SKALLOC(streamSize, SK_SYSTEM_ALLOCATION_SCOPE_STREAM);
+  if (!stream) {
+    return SK_ERROR_OUT_OF_HOST_MEMORY;
+  }
+
+  // Fill in the OpenSK external information
+  memset(stream, 0, streamSize);
+  stream->objectType = SK_OBJECT_TYPE_STREAM;
+  stream->component = component;
+
+  // Add to the component
+  stream->pNext = component->pStreams;
+  component->pStreams = stream;
+
+  *pStream = stream;
+  return SK_SUCCESS;
+}
+
+SKAPI_ATTR SkBool32 SKAPI_CALL skEnumerateFormats(
+  SkFormat                      seed,
+  SkFormat*                     pIterator,
+  SkFormat*                     pValue
+) {
+  SkFormat state;
+
+  // Handle dynamic formats (must match the machine's endianess)
+  if (seed >= SK_FORMAT_DYNAMIC_BEGIN && seed <= SK_FORMAT_DYNAMIC_END) {
+    if (*pIterator == SK_FORMAT_INVALID) {
+      *pValue = *pIterator = skGetFormatStatic(seed);
+      return SK_TRUE;
+    }
+    *pValue = SK_FORMAT_INVALID;
+    return SK_FALSE;
+  }
+
+  // Update seed to sub-state
+  switch (seed) {
+    case SK_FORMAT_FIRST:
+      if (*pIterator >= SK_FORMAT_DYNAMIC_BEGIN || *pIterator == SK_FORMAT_INVALID)
+        state = SK_FORMAT_FIRST_DYNAMIC;
+      else
+        state = SK_FORMAT_FIRST_STATIC;
+      break;
+    case SK_FORMAT_LAST:
+      if (*pIterator >= SK_FORMAT_DYNAMIC_BEGIN || *pIterator == SK_FORMAT_INVALID)
+        state = SK_FORMAT_LAST_DYNAMIC;
+      else
+        state = SK_FORMAT_LAST_STATIC;
+      break;
+    default:
+      state = seed;
+  }
+
+  // Handle SK_FORMAT_FIRST_DYNAMIC
+  if (state == SK_FORMAT_FIRST_DYNAMIC) {
+    // Initialize
+    if (*pIterator == SK_FORMAT_INVALID) {
+      *pIterator = SK_FORMAT_DYNAMIC_BEGIN;
+      *pValue = skGetFormatStatic(*pIterator);
+      return SK_TRUE;
+    }
+    // Terminate
+    else if (*pIterator >= SK_FORMAT_DYNAMIC_END) {
+      if (seed == SK_FORMAT_FIRST) {
+        *pIterator = SK_FORMAT_INVALID;
+        state = SK_FORMAT_FIRST_STATIC;
+      }
+    }
+    // Enumerate
+    else {
+      *pValue = skGetFormatStatic(++(*pIterator));
+      return SK_TRUE;
+    }
+  }
+
+  // Handle SK_FORMAT_LAST_DYNAMIC
+  if (state == SK_FORMAT_LAST_DYNAMIC) {
+    // Initialize
+    if (*pIterator == SK_FORMAT_INVALID) {
+      *pIterator = SK_FORMAT_DYNAMIC_END;
+      *pValue = skGetFormatStatic(*pIterator);
+      return SK_TRUE;
+    }
+    // Terminate
+    else if (*pIterator <= SK_FORMAT_DYNAMIC_BEGIN) {
+      if (seed == SK_FORMAT_LAST) {
+        *pIterator = SK_FORMAT_INVALID;
+        state = SK_FORMAT_LAST_STATIC;
+      }
+    }
+    // Enumerate
+    else {
+      *pValue = skGetFormatStatic(--(*pIterator));
+      return SK_TRUE;
+    }
+  }
+
+  // Handle SK_FORMAT_FIRST_STATIC
+  if (state == SK_FORMAT_FIRST_STATIC) {
+    // Initialize
+    if (*pIterator == SK_FORMAT_INVALID) {
+      *pValue = *pIterator = SK_FORMAT_STATIC_BEGIN;
+      return SK_TRUE;
+    }
+    // Terminate
+    else if (*pIterator >= SK_FORMAT_STATIC_END) {
+      *pValue = SK_FORMAT_INVALID;
+      return SK_FALSE;
+    }
+    // Enumerate
+    else {
+      *pValue = ++(*pIterator);
+      return SK_TRUE;
+    }
+  }
+
+  // Handle SK_FORMAT_FIRST_STATIC
+  if (state == SK_FORMAT_LAST_STATIC) {
+    // Initialize
+    if (*pIterator == SK_FORMAT_INVALID) {
+      *pValue = *pIterator = SK_FORMAT_STATIC_END;
+      return SK_TRUE;
+    }
+      // Terminate
+    else if (*pIterator <= SK_FORMAT_STATIC_BEGIN) {
+      *pValue = SK_FORMAT_INVALID;
+      return SK_FALSE;
+    }
+      // Enumerate
+    else {
+      *pValue = --(*pIterator);
+      return SK_TRUE;
+    }
+  }
+
+  // Handle when the type is explicitly defined
+  if (state != SK_FORMAT_INVALID) {
+    if (*pIterator == SK_FORMAT_INVALID) {
+      *pValue = *pIterator = seed;
+      return SK_TRUE;
+    }
+  }
+
+  *pValue = SK_FORMAT_INVALID;
+  return SK_FALSE;
+}
 ////////////////////////////////////////////////////////////////////////////////
 // Public API
 ////////////////////////////////////////////////////////////////////////////////
@@ -203,17 +474,9 @@ SKAPI_ATTR SkResult SKAPI_CALL skCreateInstance(
   // Initialize all compiled and supported SkHostApi information
   hostApiInitializer = hostApiInitializers;
   while (*hostApiInitializer) {
-    opResult = (*hostApiInitializer)(&hostApi, pAllocator);
+    opResult = (*hostApiInitializer)(instance, &hostApi, pAllocator);
     if (opResult != SK_SUCCESS) {
       result = SK_INCOMPLETE;
-    }
-    else {
-      hostApi->instance = instance;
-      hostApi->pNext = instance->hostApi;
-      instance->hostApi = hostApi;
-      if (instance->instanceFlags & SK_INSTANCE_REFRESH_ON_CREATE) {
-        skRefreshDeviceList(hostApi);
-      }
     }
     ++hostApiInitializer;
   }
@@ -240,6 +503,29 @@ SKAPI_ATTR void SKAPI_CALL skDestroyInstance(
   _SKFREE(instance->pAllocator, instance);
 }
 
+static void
+searchDeviceList(char const* path, SkDevice device, SkObject *result) {
+  SkComponent  component;
+  while (device) {
+    if (pathcmp(device->properties.identifier, path)) {
+      (*result) = (SkObject)device;
+      break;
+    }
+    component = device->pComponents;
+    while (component) {
+      if (pathcmp(component->properties.identifier, path)) {
+        break;
+      }
+      component = component->pNext;
+    }
+    if (component) {
+      (*result) = (SkObject)component;
+      break;
+    }
+    device = device->pNext;
+  }
+}
+
 #define ADVANCE(n) ((path[n] == '/') ? &path[n + 1] : &path[n])
 #define CHECK_END() (*path == '\0')
 SKAPI_ATTR SkObject SKAPI_CALL skRequestObject(
@@ -249,19 +535,14 @@ SKAPI_ATTR SkObject SKAPI_CALL skRequestObject(
   SkResult result;
   SkHostApi hostApi;
   SkObject deviceOrComponent;
-  SkPhysicalDevice physicalDevice;
-  SkPhysicalComponent physicalComponent;
-  SkVirtualDevice virtualDevice;
-  SkVirtualComponent virtualComponent;
   SkHostApiProperties properties;
 
-  // Check for valid sk path prefix
-  if (strncmp(path, "sk://", 5) != 0) {
-    return SK_NULL_HANDLE;
+  // Check for valid sk path prefix (no-op)
+  if (strncmp(path, "sk://", 5) == 0) {
+    path = ADVANCE(5);
   }
 
   // Check if the path should resolve to the instance
-  path = ADVANCE(5);
   if (CHECK_END()) {
     return (SkObject)instance;
   }
@@ -281,67 +562,23 @@ SKAPI_ATTR SkObject SKAPI_CALL skRequestObject(
     return SK_NULL_HANDLE;
   }
 
+  // Refresh the device list (always happens on object requests)
+  result = skScanDevices(hostApi);
+  if (result != SK_SUCCESS && result != SK_INCOMPLETE) {
+    return SK_NULL_HANDLE;
+  }
+
   // Check if the path should resolve to the host
   path = ADVANCE(strlen(properties.identifier));
   if (CHECK_END()) {
     return (SkObject)hostApi;
   }
 
+  // Check for physical devices and components
   deviceOrComponent = NULL;
-  {
-    // Check for physical devices and components
-    result = hostApi->impl.SkRefreshPhysicalDevices(hostApi, hostApi->instance->pAllocator);
-    if (result == SK_SUCCESS || result == SK_INCOMPLETE) {
-      physicalDevice = hostApi->physicalDevices;
-      while (physicalDevice) {
-        if (pathcmp(physicalDevice->properties.identifier, path)) {
-          deviceOrComponent = (SkObject)physicalDevice;
-          break;
-        }
-        physicalComponent = physicalDevice->physicalComponents;
-        while (physicalComponent) {
-          if (pathcmp(physicalComponent->properties.identifier, path)) {
-            break;
-          }
-          physicalComponent = physicalComponent->pNext;
-        }
-        if (physicalComponent) {
-          deviceOrComponent = (SkObject)physicalComponent;
-          break;
-        }
-        physicalDevice = physicalDevice->pNext;
-      }
-      if (deviceOrComponent) {
-        return deviceOrComponent;
-      }
-    }
-
-    // Check for virtual devices and components
-    result = hostApi->impl.SkRefreshVirtualDevices(hostApi, hostApi->instance->pAllocator);
-    if (result == SK_SUCCESS || result == SK_INCOMPLETE) {
-      virtualDevice = hostApi->virtualDevices;
-      while (virtualDevice) {
-        if (pathcmp(virtualDevice->properties.identifier, path)) {
-          deviceOrComponent = (SkObject)virtualDevice;
-          break;
-        }
-        virtualComponent = virtualDevice->virtualComponents;
-        while (virtualComponent) {
-          if (pathcmp(virtualComponent->properties.identifier, path)) {
-            break;
-          }
-          virtualComponent = virtualComponent->pNext;
-        }
-        if (virtualComponent) {
-          deviceOrComponent = (SkObject)virtualComponent;
-          break;
-        }
-        virtualDevice = virtualDevice->pNext;
-      }
-      if (deviceOrComponent) {
-        return deviceOrComponent;
-      }
-    }
+  searchDeviceList(path, hostApi->pDevices, &deviceOrComponent);
+  if (deviceOrComponent != SK_NULL_HANDLE) {
+    return deviceOrComponent;
   }
 
   // No valid identifier found
@@ -383,332 +620,295 @@ SKAPI_ATTR void SKAPI_CALL skGetHostApiProperties(
   *pProperties = hostApi->properties;
 }
 
-SKAPI_ATTR SkResult SKAPI_CALL skRefreshPhysicalDeviceList(
+SKAPI_ATTR SkResult SKAPI_CALL skScanDevices(
   SkHostApi                         hostApi
 ) {
-  return hostApi->impl.SkRefreshPhysicalDevices(hostApi, hostApi->instance->pAllocator);
-}
+  uint32_t physicalDevices;
+  uint32_t physicalComponents;
+  uint32_t virtualDevices;
+  uint32_t virtualComponents;
+  SkDevice device;
+  SkComponent component;
+  SkResult result;
 
-SKAPI_ATTR SkResult SKAPI_CALL skRefreshVirtualDeviceList(
-  SkHostApi                         hostApi
-) {
-  return hostApi->impl.SkRefreshVirtualDevices(hostApi, hostApi->instance->pAllocator);
-}
+  // Initialize Counts
+  physicalDevices = 0;
+  physicalComponents = 0;
+  virtualDevices = 0;
+  virtualComponents = 0;
 
-SKAPI_ATTR SkResult SKAPI_CALL skRefreshDeviceList(
-  SkHostApi                         hostApi
-) {
-  SkResult opResult;
-  SkResult result = SK_SUCCESS;
-  opResult = skRefreshPhysicalDeviceList(hostApi);
-  if (opResult != SK_SUCCESS) {
-    result = opResult;
+  // Count Devices and Components
+  result = hostApi->impl.SkScanDevices(hostApi, hostApi->instance->pAllocator);
+  if (result == SK_SUCCESS) {
+    device = hostApi->pDevices;
+    while (device) {
+      if (device->properties.isPhysical) {
+        ++physicalDevices;
+      }
+      else {
+        ++virtualDevices;
+      }
+      component = device->pComponents;
+      while (component) {
+        if (device->properties.isPhysical) {
+          ++physicalComponents;
+        }
+        else {
+          ++virtualComponents;
+        }
+        component = component->pNext;
+      }
+      device = device->pNext;
+    }
   }
-  opResult = skRefreshVirtualDeviceList(hostApi);
-  if (opResult != SK_SUCCESS) {
-    result = opResult;
-  }
+
+  // Assign counts
+  hostApi->properties.physicalDevices = physicalDevices;
+  hostApi->properties.physicalComponents = physicalComponents;
+  hostApi->properties.virtualDevices = virtualDevices;
+  hostApi->properties.virtualComponents = virtualComponents;
+
   return result;
+}
+
+static SkResult
+enumerateDeviceList(
+  SkDevice                          device,
+  SkBool32                          isPhysical,
+  uint32_t*                         pDeviceCount,
+  SkDevice*                         pDevices
+) {
+  uint32_t count = 0;
+
+  // Copy physical devices into output variables
+  while (device) {
+    if (device->properties.isPhysical == isPhysical || isPhysical == SK_UNKNOWN) {
+      if (pDevices) {
+        if (count >= *pDeviceCount) break;
+        *pDevices = device;
+        ++pDevices;
+      }
+      ++count;
+    }
+    device = device->pNext;
+  }
+  *pDeviceCount = count;
+
+  // Right now this cannot fail...
+  return SK_SUCCESS;
 }
 
 SKAPI_ATTR SkResult SKAPI_CALL skEnumeratePhysicalDevices(
   SkHostApi                         hostApi,
   uint32_t*                         pPhysicalDeviceCount,
-  SkPhysicalDevice*                 pPhysicalDevices
+  SkDevice*                         pPhysicalDevices
 ) {
-  uint32_t count = 0;
-  SkResult result = SK_SUCCESS;
-  SkPhysicalDevice physicalDevice;
-
-  // Refresh device list (if flag is set)
-  if (hostApi->instance->instanceFlags & SK_INSTANCE_REFRESH_ON_ENUMERATE) {
-    result = skRefreshPhysicalDeviceList(hostApi);
-    if (result != SK_SUCCESS) {
-      result = SK_INCOMPLETE;
-    }
-  }
-
-  // Copy physical devices into output variables
-  physicalDevice = hostApi->physicalDevices;
-  while (physicalDevice) {
-    if (pPhysicalDevices) {
-      if (count >= *pPhysicalDeviceCount) break;
-      *pPhysicalDevices = physicalDevice;
-      ++pPhysicalDevices;
-    }
-    ++count;
-    physicalDevice = physicalDevice->pNext;
-  }
-  *pPhysicalDeviceCount = count;
-
-  return result;
+  return enumerateDeviceList(hostApi->pDevices, SK_TRUE, pPhysicalDeviceCount, pPhysicalDevices);
 }
 
 SKAPI_ATTR SkResult SKAPI_CALL skEnumerateVirtualDevices(
   SkHostApi                         hostApi,
   uint32_t*                         pVirtualDeviceCount,
-  SkVirtualDevice*                  pVirtualDevices
+  SkDevice*                         pVirtualDevices
 ) {
-  uint32_t count = 0;
-  SkResult result = SK_SUCCESS;
-  SkVirtualDevice virtualDevice;
-
-  // Refresh device list
-  if (hostApi->instance->instanceFlags & SK_INSTANCE_REFRESH_ON_ENUMERATE) {
-    result = skRefreshVirtualDeviceList(hostApi);
-    if (result != SK_SUCCESS) {
-      result = SK_INCOMPLETE;
-    }
-  }
-
-  // Copy physical devices into output variables
-  virtualDevice = hostApi->virtualDevices;
-  while (virtualDevice) {
-    if (pVirtualDevices) {
-      if (count >= *pVirtualDeviceCount) break;
-      *pVirtualDevices = virtualDevice;
-      ++pVirtualDevices;
-    }
-    ++count;
-    virtualDevice = virtualDevice->pNext;
-  }
-  *pVirtualDeviceCount = count;
-
-  return result;
+  return enumerateDeviceList(hostApi->pDevices, SK_FALSE, pVirtualDeviceCount, pVirtualDevices);
 }
 
 SKAPI_ATTR SkResult SKAPI_CALL skEnumerateDevices(
   SkHostApi                         hostApi,
   uint32_t*                         pDeviceCount,
-  SkObject*                         pDevices
+  SkDevice*                         pDevices
 ) {
-  SkResult result = SK_SUCCESS;
-  SkResult opResult;
-  uint32_t physicalDevice;
-  uint32_t virtualDevice;
-
-  if (!pDevices) {
-    opResult = skEnumeratePhysicalDevices(hostApi, &physicalDevice, NULL);
-    if (opResult != SK_SUCCESS) {
-      result = opResult;
-    }
-    opResult = skEnumerateVirtualDevices(hostApi, &virtualDevice, NULL);
-    if (opResult != SK_SUCCESS) {
-      result = opResult;
-    }
-  }
-  else {
-    physicalDevice = *pDeviceCount;
-    opResult = skEnumeratePhysicalDevices(hostApi, &physicalDevice, (SkPhysicalDevice*)pDevices);
-    if (opResult != SK_SUCCESS) {
-      result = opResult;
-    }
-    virtualDevice = *pDeviceCount - physicalDevice;
-    opResult = skEnumerateVirtualDevices(hostApi, &virtualDevice, (SkVirtualDevice*)&pDevices[physicalDevice]);
-    if (opResult != SK_SUCCESS) {
-      result = opResult;
-    }
-  }
-  *pDeviceCount = physicalDevice + virtualDevice;
-
-  return result;
+  return enumerateDeviceList(hostApi->pDevices, SK_UNKNOWN, pDeviceCount, pDevices);
 }
 
-SKAPI_ATTR void SKAPI_CALL skGetPhysicalDeviceProperties(
-  SkPhysicalDevice                  physicalDevice,
+SKAPI_ATTR void SKAPI_CALL skGetDeviceProperties(
+  SkDevice                          device,
   SkDeviceProperties*               pProperties
 ) {
-  *pProperties = physicalDevice->properties;
-}
-
-SKAPI_ATTR void SKAPI_CALL skGetVirtualDeviceProperties(
-  SkVirtualDevice                   virtualDevice,
-  SkDeviceProperties*               pProperties
-) {
-  *pProperties = virtualDevice->properties;
-}
-
-SKAPI_ATTR SkResult SKAPI_CALL skGetDeviceProperties(
-  SkObject                          device,
-  SkDeviceProperties*               pProperties
-) {
-  switch (skGetObjectType((SkObject)device)) {
-    case SK_OBJECT_TYPE_PHYSICAL_DEVICE:
-      skGetPhysicalDeviceProperties((SkPhysicalDevice)device, pProperties);
-      break;
-    case SK_OBJECT_TYPE_VIRTUAL_DEVICE:
-      skGetVirtualDeviceProperties((SkVirtualDevice)device, pProperties);
-      break;
-    default:
-      return SK_ERROR_INVALID_OBJECT;
-  }
-  return SK_SUCCESS;
-}
-
-SKAPI_ATTR SkResult SKAPI_CALL skEnumeratePhysicalComponents(
-  SkPhysicalDevice                  physicalDevice,
-  uint32_t*                         pPhysicalComponentCount,
-  SkPhysicalComponent*              pPhysicalComponents
-) {
-  uint32_t count = 0;
-  SkResult result = SK_SUCCESS;
-  SkPhysicalComponent physicalComponent;
-
-  // Refresh device list
-  if (physicalDevice->hostApi->instance->instanceFlags & SK_INSTANCE_REFRESH_ON_COMPONENT_ENUMERATE) {
-    result = physicalDevice->hostApi->impl.SkRefreshPhysicalComponents(physicalDevice, physicalDevice->hostApi->instance->pAllocator);
-    if (result != SK_SUCCESS) {
-      result = SK_INCOMPLETE;
-    }
-  }
-
-  // Copy physical devices into output variables
-  physicalComponent = physicalDevice->physicalComponents;
-  while (physicalComponent) {
-    if (pPhysicalComponents) {
-      if (count >= *pPhysicalComponentCount) break;
-      *pPhysicalComponents = physicalComponent;
-      ++pPhysicalComponents;
-    }
-    ++count;
-    physicalComponent = physicalComponent->pNext;
-  }
-  *pPhysicalComponentCount = count;
-
-  return result;
-}
-
-SKAPI_ATTR SkResult SKAPI_CALL skEnumerateVirtualComponents(
-  SkVirtualDevice                   virtualDevice,
-  uint32_t*                         pVirtualComponentCount,
-  SkVirtualComponent*               pVirtualComponents
-) {
-  uint32_t count = 0;
-  SkResult result = SK_SUCCESS;
-  SkVirtualComponent virtualComponent;
-
-  // Refresh device list
-  if (virtualDevice->hostApi->instance->instanceFlags & SK_INSTANCE_REFRESH_ON_COMPONENT_ENUMERATE) {
-    result = virtualDevice->hostApi->impl.SkRefreshVirtualComponents(virtualDevice, virtualDevice->hostApi->instance->pAllocator);
-    if (result != SK_SUCCESS) {
-      result = SK_INCOMPLETE;
-    }
-  }
-
-  // Copy physical devices into output variables
-  virtualComponent = virtualDevice->virtualComponents;
-  while (virtualComponent) {
-    if (pVirtualComponents) {
-      if (count >= *pVirtualComponentCount) break;
-      *pVirtualComponents = virtualComponent;
-      ++pVirtualComponents;
-    }
-    ++count;
-    virtualComponent = virtualComponent->pNext;
-  }
-  *pVirtualComponentCount = count;
-
-  return result;
+  *pProperties = device->properties;
 }
 
 SKAPI_ATTR SkResult SKAPI_CALL skEnumerateComponents(
-  SkObject                          device,
+  SkDevice                          device,
   uint32_t*                         pComponentCount,
-  SkObject*                         pComponents
+  SkComponent *                     pComponents
 ) {
-  switch (skGetObjectType(device)) {
-    case SK_OBJECT_TYPE_PHYSICAL_DEVICE:
-      return skEnumeratePhysicalComponents((SkPhysicalDevice)device, pComponentCount, (SkPhysicalComponent*)pComponents);
-    case SK_OBJECT_TYPE_VIRTUAL_DEVICE:
-      return skEnumerateVirtualComponents((SkVirtualDevice)device, pComponentCount, (SkVirtualComponent*)pComponents);
-    default:
-      return SK_ERROR_INVALID_OBJECT;
+  uint32_t count = 0;
+  SkComponent component;
+
+  // Copy physical devices into output variables
+  component = device->pComponents;
+  while (component) {
+    if (pComponents) {
+      if (count >= *pComponentCount) break;
+      *pComponents = component;
+      ++pComponents;
+    }
+    ++count;
+    component = component->pNext;
   }
-}
+  *pComponentCount = count;
 
-SKAPI_ATTR void SKAPI_CALL skGetPhysicalComponentProperties(
-  SkPhysicalComponent               physicalComponent,
-  SkComponentProperties*            pProperties
-) {
-  *pProperties = physicalComponent->properties;
-}
-
-
-SKAPI_ATTR void SKAPI_CALL skGetVirtualComponentProperties(
-  SkVirtualComponent                virtualComponent,
-  SkComponentProperties*            pProperties
-) {
-  *pProperties = virtualComponent->properties;
-}
-
-SKAPI_ATTR SkResult SKAPI_CALL skGetComponentProperties(
-  SkObject                          component,
-  SkComponentProperties*            pProperties
-) {
-  switch (skGetObjectType(component)) {
-    case SK_OBJECT_TYPE_PHYSICAL_COMPONENT:
-      skGetPhysicalComponentProperties((SkPhysicalComponent)component, pProperties);
-      break;
-    case SK_OBJECT_TYPE_VIRTUAL_COMPONENT:
-      skGetVirtualComponentProperties((SkVirtualComponent)component, pProperties);
-      break;
-    default:
-      return SK_ERROR_INVALID_OBJECT;
-  }
+  // Right now this cannot fail...
   return SK_SUCCESS;
 }
 
-SKAPI_ATTR SkResult SKAPI_CALL skGetPhysicalComponentLimits(
-  SkPhysicalComponent               physicalComponent,
-  SkStreamType                      streamType,
-  SkComponentLimits*                pLimits
+SKAPI_ATTR void SKAPI_CALL skGetComponentProperties(
+  SkComponent                       component,
+  SkComponentProperties*            pProperties
 ) {
-  return physicalComponent->physicalDevice->hostApi->impl.SkGetPhysicalComponentLimits(
-    physicalComponent, streamType, pLimits
-  );
+  *pProperties = component->properties;
 }
 
-SKAPI_ATTR SkResult SKAPI_CALL skGetVirtualComponentLimits(
-  SkVirtualComponent                virtualComponent,
-  SkStreamType                      streamType,
-  SkComponentLimits*                pLimits
-) {
-  return virtualComponent->virtualDevice->hostApi->impl.SkGetVirtualComponentLimits(
-      virtualComponent, streamType, pLimits
-  );
-}
 
 SKAPI_ATTR SkResult SKAPI_CALL skGetComponentLimits(
-  SkObject                          component,
+  SkComponent                       component,
   SkStreamType                      streamType,
   SkComponentLimits*                pLimits
 ) {
-  switch (skGetObjectType(component)) {
-    case SK_OBJECT_TYPE_PHYSICAL_COMPONENT:
-      return skGetPhysicalComponentLimits((SkPhysicalComponent)component, streamType, pLimits);
-    case SK_OBJECT_TYPE_VIRTUAL_COMPONENT:
-      return skGetVirtualComponentLimits((SkVirtualComponent)component, streamType, pLimits);
-    default:
-      return SK_ERROR_INVALID_OBJECT;
-  }
+  return component->device->hostApi->impl.SkGetComponentLimits(
+    component, streamType, pLimits
+  );
 }
 
+SKAPI_ATTR SkResult SKAPI_CALL skRequestStream(
+  SkComponent                       component,
+  SkStreamRequest*                  pStreamRequest,
+  SkStream*                         pStream
+) {
+  return component->device->hostApi->impl.SkRequestStream(
+      component, pStreamRequest, pStream, component->device->hostApi->instance->pAllocator
+  );
+}
+
+SKAPI_ATTR void SKAPI_CALL skGetStreamInfo(
+  SkStream                          stream,
+  SkStreamInfo*                     pStreamInfo
+) {
+  *pStreamInfo = stream->streamInfo;
+}
+
+SKAPI_ATTR int64_t SKAPI_CALL skStreamWriteInterleaved(
+  SkStream                          stream,
+  void const*                       pBuffer,
+  uint32_t                          samples
+) {
+  SKASSERT(stream->streamInfo.streamType == SK_STREAM_TYPE_PCM_PLAYBACK, "Attempted to write to a non-write or non-PCM stream.");
+  return stream->component->device->hostApi->impl.SkStreamWriteInterleaved(
+    stream,
+    pBuffer,
+    samples
+  );
+}
+
+SKAPI_ATTR int64_t SKAPI_CALL skStreamWriteNoninterleaved(
+  SkStream                          stream,
+  void const* const*                pBuffer,
+  uint32_t                          samples
+) {
+  SKASSERT(stream->streamInfo.streamType == SK_STREAM_TYPE_PCM_PLAYBACK, "Attempted to write to a non-write or non-PCM stream.");
+  return stream->component->device->hostApi->impl.SkStreamWriteNoninterleaved(
+    stream,
+    pBuffer,
+    samples
+  );
+}
+
+SKAPI_ATTR int64_t SKAPI_CALL skStreamReadInterleaved(
+  SkStream                          stream,
+  void*                             pBuffer,
+  uint32_t                          samples
+) {
+  SKASSERT(stream->streamInfo.streamType == SK_STREAM_TYPE_PCM_CAPTURE, "Attempted to read from a non-capture or non-PCM stream.");
+  return stream->component->device->hostApi->impl.SkStreamReadInterleaved(
+    stream,
+    pBuffer,
+    samples
+  );
+}
+
+SKAPI_ATTR int64_t SKAPI_CALL skStreamReadNoninterleaved(
+  SkStream                          stream,
+  void**                            pBuffer,
+  uint32_t                          samples
+) {
+  SKASSERT(stream->streamInfo.streamType == SK_STREAM_TYPE_PCM_CAPTURE, "Attempted to read from a non-capture or non-PCM stream.");
+  return stream->component->device->hostApi->impl.SkStreamReadNoninterleaved(
+    stream,
+    pBuffer,
+    samples
+  );
+}
+
+SKAPI_ATTR void SKAPI_CALL skDestroyStream(
+  SkStream                          stream,
+  SkBool32                          drain
+) {
+  stream->component->device->hostApi->impl.SkDestroyStream(
+    stream,
+    drain
+  );
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// Stringize Functions
+////////////////////////////////////////////////////////////////////////////////
 #define PRINT_CASE(e) case e: return #e
+SKAPI_ATTR char const* SKAPI_CALL skGetObjectTypeString(
+  SkObjectType                      objectType
+) {
+  switch (objectType) {
+    PRINT_CASE(SK_OBJECT_TYPE_INVALID);
+    PRINT_CASE(SK_OBJECT_TYPE_INSTANCE);
+    PRINT_CASE(SK_OBJECT_TYPE_HOST_API);
+    PRINT_CASE(SK_OBJECT_TYPE_DEVICE);
+    PRINT_CASE(SK_OBJECT_TYPE_COMPONENT);
+    PRINT_CASE(SK_OBJECT_TYPE_STREAM);
+  }
+  return NULL;
+}
+
 SKAPI_ATTR char const* SKAPI_CALL skGetStreamTypeString(
   SkStreamType                      streamType
 ) {
   switch (streamType) {
+    PRINT_CASE(SK_STREAM_TYPE_NONE);
     PRINT_CASE(SK_STREAM_TYPE_PCM_PLAYBACK);
     PRINT_CASE(SK_STREAM_TYPE_PCM_CAPTURE);
-    default: return NULL;
   }
+  SKERROR("Invalid or unsupported value (%d)", (int)streamType);
+}
+
+SKAPI_ATTR char const* SKAPI_CALL skGetAccessModeString(
+  SkAccessMode                      accessMode
+) {
+  switch (accessMode) {
+    PRINT_CASE(SK_ACCESS_MODE_BLOCK);
+    PRINT_CASE(SK_ACCESS_MODE_NONBLOCK);
+  }
+  SKERROR("Invalid or unsupported value (%d)", (int)accessMode);
+}
+
+SKAPI_ATTR char const* SKAPI_CALL skGetAccessTypeString(
+  SkAccessType                      accessType
+) {
+  switch (accessType) {
+    PRINT_CASE(SK_ACCESS_TYPE_ANY);
+    PRINT_CASE(SK_ACCESS_TYPE_INTERLEAVED);
+    PRINT_CASE(SK_ACCESS_TYPE_NONINTERLEAVED);
+    PRINT_CASE(SK_ACCESS_TYPE_MMAP_INTERLEAVED);
+    PRINT_CASE(SK_ACCESS_TYPE_MMAP_NONINTERLEAVED);
+    PRINT_CASE(SK_ACCESS_TYPE_MMAP_COMPLEX);
+  }
+  SKERROR("Invalid or unsupported value (%d)", (int)accessType);
 }
 
 SKAPI_ATTR char const* SKAPI_CALL skGetFormatString(
   SkFormat                          format
 ) {
   switch (format) {
-    PRINT_CASE(SK_FORMAT_UNKNOWN);
+    PRINT_CASE(SK_FORMAT_INVALID);
     PRINT_CASE(SK_FORMAT_ANY);
     PRINT_CASE(SK_FORMAT_S8);
     PRINT_CASE(SK_FORMAT_U8);
@@ -736,8 +936,14 @@ SKAPI_ATTR char const* SKAPI_CALL skGetFormatString(
     PRINT_CASE(SK_FORMAT_U32);
     PRINT_CASE(SK_FORMAT_FLOAT);
     PRINT_CASE(SK_FORMAT_FLOAT64);
-    default: return NULL;
+    PRINT_CASE(SK_FORMAT_FIRST);
+    PRINT_CASE(SK_FORMAT_FIRST_DYNAMIC);
+    PRINT_CASE(SK_FORMAT_FIRST_STATIC);
+    PRINT_CASE(SK_FORMAT_LAST);
+    PRINT_CASE(SK_FORMAT_LAST_DYNAMIC);
+    PRINT_CASE(SK_FORMAT_LAST_STATIC);
   }
+  SKERROR("Invalid or unsupported value (%d)", (int)format);
 }
 
 SKAPI_ATTR SkFormat SKAPI_CALL skGetFormatStatic(

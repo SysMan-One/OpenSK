@@ -24,23 +24,20 @@ extern "C" {
 #define SK_VERSION_MINOR(version) ((uint32_t)(version) >> 12 & 0x3ff)
 #define SK_VERSION_PATCH(version) ((uint32_t)(version) & 0xfff)
 #define SK_NULL_HANDLE 0
-#define SKOUT
-#define SKIN
-
-typedef uint32_t SkFlags;
-typedef uint32_t SkBool32;
 
 SK_DEFINE_HANDLE(SkObject)
 SK_DEFINE_HANDLE(SkInstance)
 SK_DEFINE_HANDLE(SkHostApi)
-SK_DEFINE_HANDLE(SkPhysicalDevice)
-SK_DEFINE_HANDLE(SkPhysicalComponent)
-SK_DEFINE_HANDLE(SkVirtualDevice)
-SK_DEFINE_HANDLE(SkVirtualComponent)
+SK_DEFINE_HANDLE(SkDevice)
+SK_DEFINE_HANDLE(SkComponent)
 SK_DEFINE_HANDLE(SkStream)
+
+typedef int32_t SkBool32;
+typedef uint32_t SkFlags;
 
 #define SK_TRUE 1
 #define SK_FALSE 0
+#define SK_UNKNOWN -1
 #define SK_MAX_EXTENSION_NAME_SIZE 256
 #define SK_MAX_DEVICE_NAME_SIZE 256
 #define SK_MAX_COMPONENT_NAME_SIZE 256
@@ -60,18 +57,13 @@ typedef enum SkObjectType {
   SK_OBJECT_TYPE_INVALID = 0,
   SK_OBJECT_TYPE_INSTANCE,
   SK_OBJECT_TYPE_HOST_API,
-  SK_OBJECT_TYPE_PHYSICAL_DEVICE,
-  SK_OBJECT_TYPE_VIRTUAL_DEVICE,
-  SK_OBJECT_TYPE_PHYSICAL_COMPONENT,
-  SK_OBJECT_TYPE_VIRTUAL_COMPONENT
+  SK_OBJECT_TYPE_DEVICE,
+  SK_OBJECT_TYPE_COMPONENT,
+  SK_OBJECT_TYPE_STREAM
 } SkObjectType;
 
 typedef enum SkInstanceCreateFlags {
-  SK_NONE = 0,
-  SK_INSTANCE_REFRESH_ON_CREATE = 1<<0,
-  SK_INSTANCE_REFRESH_ON_DEVICE_ENUMERATE = 1<<1,
-  SK_INSTANCE_REFRESH_ON_COMPONENT_ENUMERATE = 1<<2,
-  SK_INSTANCE_REFRESH_ON_ENUMERATE = SK_INSTANCE_REFRESH_ON_DEVICE_ENUMERATE | SK_INSTANCE_REFRESH_ON_COMPONENT_ENUMERATE
+  SK_INSTANCE_DEFAULT = 0
 } SkInstanceCreateFlags;
 
 typedef enum SkResult {
@@ -95,6 +87,7 @@ typedef enum SkResult {
 
 typedef enum SkAllocationScope {
   SK_SYSTEM_ALLOCATION_SCOPE_INSTANCE = 0,
+  SK_SYSTEM_ALLOCATION_SCOPE_HOST_API,
   SK_SYSTEM_ALLOCATION_SCOPE_DEVICE,
   SK_SYSTEM_ALLOCATION_SCOPE_STREAM,
   SK_SYSTEM_ALLOCATION_SCOPE_EXTENSION
@@ -115,13 +108,15 @@ typedef enum SkRangeDirection {
 } SkRangeDirection;
 
 typedef enum SkStreamType {
+  SK_STREAM_TYPE_NONE = 0,
   SK_STREAM_TYPE_PCM_PLAYBACK = 1<<0,
   SK_STREAM_TYPE_PCM_CAPTURE  = 1<<1
 } SkStreamType;
 #define SK_STREAM_TYPE_BEGIN SK_STREAM_TYPE_PCM_PLAYBACK
-#define SK_STREAM_TYPE_END SK_STREAM_TYPE_PCM_CAPTURE
-#define SK_STREAM_TYPE_MASK 0x3
-typedef SkFlags SkStreamTypes;
+#define SK_STREAM_TYPE_END (SK_STREAM_TYPE_PCM_CAPTURE<<1)
+#define SK_STREAM_TYPE_PCM_BEGIN SK_STREAM_TYPE_PCM_PLAYBACK
+#define SK_STREAM_TYPE_PCM_END (SK_STREAM_TYPE_PCM_CAPTURE<<1)
+typedef SkStreamType SkStreamTypes;
 
 typedef enum SkAccessType {
   SK_ACCESS_TYPE_ANY,
@@ -138,7 +133,7 @@ typedef enum SkAccessMode {
 } SkAccessMode;
 
 typedef enum SkFormat {
-  SK_FORMAT_UNKNOWN = -1,
+  SK_FORMAT_INVALID = -1,
   SK_FORMAT_ANY = 0,
   SK_FORMAT_S8,
   SK_FORMAT_U8,
@@ -168,7 +163,14 @@ typedef enum SkFormat {
   SK_FORMAT_U32,
   SK_FORMAT_FLOAT,
   SK_FORMAT_FLOAT64,
-  SK_FORMAT_MAX
+
+  // Will select dynamically
+  SK_FORMAT_FIRST,
+  SK_FORMAT_FIRST_DYNAMIC,
+  SK_FORMAT_FIRST_STATIC,
+  SK_FORMAT_LAST,
+  SK_FORMAT_LAST_DYNAMIC,
+  SK_FORMAT_LAST_STATIC
 } SkFormat;
 #define SK_FORMAT_BEGIN SK_FORMAT_ANY
 #define SK_FORMAT_END SK_FORMAT_FLOAT64
@@ -176,6 +178,7 @@ typedef enum SkFormat {
 #define SK_FORMAT_STATIC_END SK_FORMAT_FLOAT64_BE
 #define SK_FORMAT_DYNAMIC_BEGIN SK_FORMAT_S16
 #define SK_FORMAT_DYNAMIC_END SK_FORMAT_FLOAT64
+#define SK_FORMAT_MAX (SK_FORMAT_FLOAT64 + 1)
 
 typedef void* (SKAPI_PTR *PFN_skAllocationFunction)(
   void*                             pUserData,
@@ -239,6 +242,7 @@ typedef struct SkDeviceProperties {
   char                              driverName[SK_MAX_DRIVER_NAME_SIZE];
   char                              mixerName[SK_MAX_MIXER_NAME_SIZE];
   uint32_t                          componentCount;
+  SkBool32                          isPhysical;
 } SkDeviceProperties;
 
 typedef struct SkComponentProperties {
@@ -246,6 +250,7 @@ typedef struct SkComponentProperties {
   char                              componentName[SK_MAX_COMPONENT_NAME_SIZE];
   char                              componentDescription[SK_MAX_COMPONENT_DESC_SIZE];
   SkStreamTypes                     supportedStreams;
+  SkBool32                          isPhysical;
 } SkComponentProperties;
 
 typedef struct SkComponentLimits {
@@ -266,50 +271,53 @@ typedef struct SkComponentLimits {
   SkBool32                          supportedFormats[SK_FORMAT_MAX];
 } SkComponentLimits;
 
-typedef struct SkStreamRequestInfo {
+typedef struct SkPcmStreamRequest {
   SkStreamType                      streamType;
-  SkAccessMode                      accessMode;
   SkAccessType                      accessType;
+  SkAccessMode                      accessMode;
   SkFormat                          formatType;
   uint32_t                          channels;
   uint32_t                          periods;
   uint32_t                          periodSize;
   uint32_t                          periodTime;
-  uint32_t                          rate;
+  uint32_t                          sampleRate;
   uint32_t                          bufferSize;
   uint32_t                          bufferTime;
-} SkStreamRequestInfo;
+} SkPcmStreamRequest;
 
-typedef struct SkStreamInfo {
+typedef union SkStreamRequest {
+  SkStreamType                      streamType;
+  SkPcmStreamRequest                pcm;
+} SkStreamRequest;
+
+typedef struct SkPcmStreamInfo {
   SkStreamType                      streamType;
   SkAccessMode                      accessMode;
   SkAccessType                      accessType;
   SkFormat                          formatType;
   uint32_t                          formatBits;   // Number of bits in the format
-  SkRangedValue                     periods;      // Number of periods
+  uint32_t                          periods;      // Number of periods
   uint32_t                          channels;     // Number of channels in a sample
   uint32_t                          sampleBits;   // Number of bits in a sample
-  SkRangedValue                     sampleTime;   // Time in microseconds of a sample
+  uint32_t                          sampleTime;   // Time in microseconds of a sample
   uint32_t                          periodSamples;// Number of utils in a period
   uint32_t                          periodBits;   // Number of bits in a period
-  SkRangedValue                     periodTime;   // Time in microseconds of a period
+  uint32_t                          periodTime;   // Time in microseconds of a period
   uint32_t                          bufferSamples;// Number of utils in the back-buffer
   uint32_t                          bufferBits;   // Number of bits in the back-buffer
-  SkRangedValue                     bufferTime;   // Time in microseconds in the back-buffer
-  SkRangedValue                     rate;
+  uint32_t                          bufferTime;   // Time in microseconds in the back-buffer
+  uint32_t                          sampleRate;   // Number of samples per second
   uint32_t                          latency;
+} SkPcmStreamInfo;
+
+typedef union SkStreamInfo {
+  SkStreamType                      streamType;
+  SkPcmStreamInfo                   pcm;
 } SkStreamInfo;
 
 ////////////////////////////////////////////////////////////////////////////////
 // Standard Functions
 ////////////////////////////////////////////////////////////////////////////////
-/*
-SKAPI_ATTR SkResult SKAPI_CALL skEnumerateInstanceExtensionProperties(
-  void*                             reserved,
-  uint32_t*                         pExtensionCount,
-  SkExtensionProperties*            pExtensionProperties
-);
-*/
 SKAPI_ATTR SkResult SKAPI_CALL skCreateInstance(
   const SkInstanceCreateInfo*       pCreateInfo,
   const SkAllocationCallbacks*      pAllocator,
@@ -335,105 +343,100 @@ SKAPI_ATTR SkResult SKAPI_CALL skEnumerateHostApi(
   SkHostApi*                        pHostApi
 );
 
+SKAPI_ATTR SkResult SKAPI_CALL skScanDevices(
+  SkHostApi                         hostApi
+);
+
 SKAPI_ATTR void SKAPI_CALL skGetHostApiProperties(
   SkHostApi                         hostApi,
   SkHostApiProperties*              pProperties
 );
 
-SKAPI_ATTR SkResult SKAPI_CALL skRefreshPhysicalDeviceList(
-  SkHostApi                         hostApi
-);
-
-SKAPI_ATTR SkResult SKAPI_CALL skRefreshVirtualDeviceList(
-  SkHostApi                         hostApi
-);
-
-SKAPI_ATTR SkResult SKAPI_CALL skRefreshDeviceList(
-  SkHostApi                         hostApi
-);
-
 SKAPI_ATTR SkResult SKAPI_CALL skEnumeratePhysicalDevices(
   SkHostApi                         hostApi,
   uint32_t*                         pPhysicalDeviceCount,
-  SkPhysicalDevice*                 pPhysicalDevices
+  SkDevice*                         pPhysicalDevices
 );
 
 SKAPI_ATTR SkResult SKAPI_CALL skEnumerateVirtualDevices(
   SkHostApi                         hostApi,
   uint32_t*                         pVirtualDeviceCount,
-  SkVirtualDevice*                  pVirtualDevices
+  SkDevice*                         pVirtualDevices
 );
 
 SKAPI_ATTR SkResult SKAPI_CALL skEnumerateDevices(
   SkHostApi                         hostApi,
   uint32_t*                         pDeviceCount,
-  SkObject*                         pDevices
+  SkDevice*                         pDevices
 );
 
-SKAPI_ATTR void SKAPI_CALL skGetPhysicalDeviceProperties(
-  SkPhysicalDevice                  physicalDevice,
+SKAPI_ATTR void SKAPI_CALL skGetDeviceProperties(
+  SkDevice                          device,
   SkDeviceProperties*               pProperties
-);
-
-SKAPI_ATTR void SKAPI_CALL skGetVirtualDeviceProperties(
-  SkVirtualDevice                   virtualDevice,
-  SkDeviceProperties*               pProperties
-);
-
-SKAPI_ATTR SkResult SKAPI_CALL skGetDeviceProperties(
-  SkObject                          device,
-  SkDeviceProperties*               pProperties
-);
-
-SKAPI_ATTR SkResult SKAPI_CALL skEnumeratePhysicalComponents(
-  SkPhysicalDevice                  physicalDevice,
-  uint32_t*                         pPhysicalComponentCount,
-  SkPhysicalComponent*              pPhysicalComponents
-);
-
-SKAPI_ATTR SkResult SKAPI_CALL skEnumerateVirtualComponents(
-  SkVirtualDevice                   virtualDevice,
-  uint32_t*                         pVirtualComponentCount,
-  SkVirtualComponent*               pVirtualComponents
 );
 
 SKAPI_ATTR SkResult SKAPI_CALL skEnumerateComponents(
-  SkObject                          device,
+  SkDevice                          device,
   uint32_t*                         pComponentCount,
-  SkObject*                         pComponents
+  SkComponent*                      pComponents
 );
 
-SKAPI_ATTR void SKAPI_CALL skGetPhysicalComponentProperties(
-  SkPhysicalComponent               physicalComponent,
+SKAPI_ATTR void SKAPI_CALL skGetComponentProperties(
+  SkComponent                       component,
   SkComponentProperties*            pProperties
-);
-
-SKAPI_ATTR void SKAPI_CALL skGetVirtualComponentProperties(
-  SkVirtualComponent                virtualComponent,
-  SkComponentProperties*            pProperties
-);
-
-SKAPI_ATTR SkResult SKAPI_CALL skGetComponentProperties(
-  SkObject                          component,
-  SkComponentProperties*            pProperties
-);
-
-SKAPI_ATTR SkResult SKAPI_CALL skGetPhysicalComponentLimits(
-  SkPhysicalComponent               physicalComponent,
-  SkStreamType                      streamType,
-  SkComponentLimits*                pLimits
-);
-
-SKAPI_ATTR SkResult SKAPI_CALL skGetVirtualComponentLimits(
-  SkVirtualComponent                virtualComponent,
-  SkStreamType                      streamType,
-  SkComponentLimits*                pLimits
 );
 
 SKAPI_ATTR SkResult SKAPI_CALL skGetComponentLimits(
-  SkObject                          component,
+  SkComponent                       component,
   SkStreamType                      streamType,
   SkComponentLimits*                pLimits
+);
+
+SKAPI_ATTR SkResult SKAPI_CALL skRequestStream(
+  SkComponent                       component,
+  SkStreamRequest*                  pStreamRequest,
+  SkStream*                         pStream
+);
+
+SKAPI_ATTR void SKAPI_CALL skGetStreamInfo(
+  SkStream                          stream,
+  SkStreamInfo*                     pStreamInfo
+);
+
+SKAPI_ATTR int64_t SKAPI_CALL skStreamWriteInterleaved(
+  SkStream                          stream,
+  void const*                       pBuffer,
+  uint32_t                          samples
+);
+
+SKAPI_ATTR int64_t SKAPI_CALL skStreamWriteNoninterleaved(
+  SkStream                          stream,
+  void const* const*                pBuffer,
+  uint32_t                          samples
+);
+
+SKAPI_ATTR int64_t SKAPI_CALL skStreamReadInterleaved(
+  SkStream                          stream,
+  void*                             pBuffer,
+  uint32_t                          samples
+);
+
+SKAPI_ATTR int64_t SKAPI_CALL skStreamReadNoninterleaved(
+  SkStream                          stream,
+  void**                            pBuffer,
+  uint32_t                          samples
+);
+
+SKAPI_ATTR void SKAPI_CALL skDestroyStream(
+  SkStream                          stream,
+  SkBool32                          drain
+);
+
+////////////////////////////////////////////////////////////////////////////////
+// Stringize Functions
+////////////////////////////////////////////////////////////////////////////////
+SKAPI_ATTR char const* SKAPI_CALL skGetObjectTypeString(
+  SkObjectType                      objectType
 );
 
 SKAPI_ATTR char const* SKAPI_CALL skGetStreamTypeString(
@@ -444,120 +447,18 @@ SKAPI_ATTR char const* SKAPI_CALL skGetFormatString(
   SkFormat                          format
 );
 
+SKAPI_ATTR char const* SKAPI_CALL skGetAccessModeString(
+  SkAccessMode                      accessMode
+);
+
+SKAPI_ATTR char const* SKAPI_CALL skGetAccessTypeString(
+  SkAccessType                      accessType
+);
+
 SKAPI_ATTR SkFormat SKAPI_CALL skGetFormatStatic(
   SkFormat                          format
 );
 
-/*
-
-SKAPI_ATTR void SKAPI_CALL skGetPhysicalComponentProperties(
-  SkPhysicalComponent               physicalComponent,
-  SkComponentProperties*            pProperties
-);
-
-SKAPI_ATTR void SKAPI_CALL skGetPhysicalComponentLimits(
-  SkPhysicalComponent               physicalComponent,
-  SkStreamType                      streamType,
-  SkComponentLimits*                pLimits
-);
-
-SKAPI_ATTR void SKAPI_CALL skGetVirtualDeviceProperties(
-  SkVirtualDevice                   virtualDevice,
-  SkDeviceProperties*               pProperties
-);
-
-SKAPI_ATTR SkResult SKAPI_CALL skEnumerateVirtualComponents(
-  SkVirtualDevice                   virtualDevice,
-  uint32_t*                         pVirtualComponentCount,
-  SkVirtualComponent*               pVirtualComponents
-);
-
-SKAPI_ATTR void SKAPI_CALL skGetVirtualComponentProperties(
-  SkVirtualComponent                virtualComponent,
-  SkComponentProperties*            pProperties
-);
-
-SKAPI_ATTR SkResult SKAPI_CALL skResolvePhysicalComponent(
-  SkVirtualComponent                virtualComponent,
-  SkStreamType                      streamType,
-  SkPhysicalComponent*              pPhysicalComponent
-);
-
-SKAPI_ATTR void SKAPI_CALL skResolvePhysicalDevice(
-  SkPhysicalComponent               physicalComponent,
-  SkPhysicalDevice*                 pPhysicalDevice
-);
-
-SKAPI_ATTR SkResult SKAPI_CALL skRequestPhysicalStream(
-  SkPhysicalComponent               physicalComponent,
-  SkStreamRequestInfo*              pStreamRequestInfo,
-  SkStream*                         pStream
-);
-
-SKAPI_ATTR SkResult SKAPI_CALL skRequestVirtualStream(
-  SkVirtualComponent                virtualComponent,
-  SkStreamRequestInfo*              pStreamRequestInfo,
-  SkStream*                         pStream
-);
-
-SKAPI_ATTR SkResult SKAPI_CALL skRequestDefaultStream(
-  SkInstance                        instance,
-  SkStreamRequestInfo*              pStreamRequestInfo,
-  SkStream*                         pStream
-);
-
-SKAPI_ATTR SkResult SKAPI_CALL skGetStreamInfo(
-  SkStream                          stream,
-  SkStreamInfo*                     pStreamInfo
-);
-
-SKAPI_ATTR int64_t SKAPI_CALL skStreamWriteInterleaved(
-  SkStream                          stream,
-  void const*                       pBuffer,
-  uint32_t                          framesCount
-);
-
-SKAPI_ATTR int64_t SKAPI_CALL skStreamWriteNoninterleaved(
-  SkStream                          stream,
-  void const*const*                 pBuffer,
-  uint32_t                          framesCount
-);
-
-SKAPI_ATTR void SKAPI_CALL skDestroyStream(
-  SkStream                          stream,
-  SkBool32                          drain
-);
-
-////////////////////////////////////////////////////////////////////////////////
-// Extension: SK_SEA_device_polling
-////////////////////////////////////////////////////////////////////////////////
-#define SK_SEA_device_polling 1
-#define SK_SEA_DEVICE_POLLING_SPEC_VERSION   1
-#define SK_SEA_DEVICE_POLLING_EXTENSION_NAME "SK_SEA_device_polling"
-
-typedef enum SkDeviceEventTypeSEA {
-  SK_DEVICE_EVENT_ADDED_SEA,
-  SK_DEVICE_EVENT_REMOVED_SEA,
-  SK_DEVICE_EVENT_ALL_SEA = 0xffff
-} SkDeviceEventTypeSEA;
-
-typedef struct SkDeviceEventSEA {
-  SkDeviceEventTypeSEA type;
-  SkPhysicalDevice physicalDevice;
-} SkDeviceEventSEA;
-
-typedef void (SKAPI_PTR *PFN_skDeviceCallbackSEA)(
-  void*                             pUserData,
-  SkDeviceEventSEA*                 pEvent
-);
-
-SKAPI_ATTR SkResult SKAPI_CALL skRegisterDeviceCallbackSEA(
-  SkInstance                        instance,
-  SkDeviceEventTypeSEA              eventType,
-  PFN_skDeviceCallbackSEA           pfnDeviceCallback,
-  void*                             pUserData
-);
-*/
 #ifdef    __cplusplus
 }
 #endif // __cplusplus
