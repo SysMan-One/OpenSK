@@ -394,8 +394,8 @@ skParseColorConfigurationUTL(
 
 SkResult
 skConstructColorDatabaseUTL(
-    SkColorDatabaseUTL*         pColorDatabase,
-    SkAllocationCallbacks*      pAllocator
+  SkColorDatabaseUTL*         pColorDatabase,
+  SkAllocationCallbacks*      pAllocator
 ) {
   uint32_t idx;
   SkResult result;
@@ -406,7 +406,7 @@ skConstructColorDatabaseUTL(
 
   // Allocate and initialize SkColorDatabase object
   if (!pAllocator) pAllocator = &SkDefaultAllocationCallbacks;
-  SkColorDatabaseUTL db = SKALLOC(sizeof(struct SkColorDatabaseUTL_T), SK_SYSTEM_ALLOCATION_SCOPE_EXTENSION);
+  SkColorDatabaseUTL db = SKALLOC(pAllocator, sizeof(struct SkColorDatabaseUTL_T), SK_SYSTEM_ALLOCATION_SCOPE_EXTENSION);
   if (!db) {
     return SK_ERROR_OUT_OF_HOST_MEMORY;
   }
@@ -416,7 +416,7 @@ skConstructColorDatabaseUTL(
   for (idx = 0; idx < sizeof(SkConstructColorDatabaseFilenamesIMPL) / sizeof(char const*); ++idx) {
     result = skExpandEnvironmentIMPL(SkConstructColorDatabaseFilenamesIMPL[idx], buffer);
     if (result != SK_SUCCESS) {
-      SKFREE(db);
+      SKFREE(pAllocator, db);
       return result;
     }
     file = fopen(buffer, "r");
@@ -427,7 +427,7 @@ skConstructColorDatabaseUTL(
         if (result != SK_SUCCESS) {
           free(line);
           fclose(file);
-          SKFREE(db);
+          SKFREE(pAllocator, db);
           return result;
         }
       }
@@ -441,7 +441,7 @@ skConstructColorDatabaseUTL(
   if (env) {
     result = skParseColorConfigurationUTL(db, env);
     if (result != SK_SUCCESS) {
-      SKFREE(db);
+      SKFREE(pAllocator, db);
       return result;
     }
   }
@@ -451,16 +451,16 @@ skConstructColorDatabaseUTL(
 }
 
 void skDestructColorDatabaseUTL(
-    SkColorDatabaseUTL          colorDatabase,
-    SkAllocationCallbacks*      pAllocator
+  SkColorDatabaseUTL          colorDatabase,
+  SkAllocationCallbacks*      pAllocator
 ) {
-  SKFREE(colorDatabase);
+  SKFREE(pAllocator, colorDatabase);
 }
 
 char const* skGetColorCodeUTL(
-    SkColorDatabaseUTL          colorDatabase,
-    char const*                 identifier,
-    SkColorKindUTL              colorKind
+  SkColorDatabaseUTL          colorDatabase,
+  char const*                 identifier,
+  SkColorKindUTL              colorKind
 ) {
   uint32_t idx;
   for (idx = 0; idx < colorDatabase->specificColorsCount; ++idx) {

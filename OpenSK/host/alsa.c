@@ -16,20 +16,13 @@
 
 #define SK_ALSA_VIRTUAL_DEVICE_CARD_ID -1
 #define SK_ALSA_MAX_IDENTIFIER_SIZE 256
-#define SK_ALSA_MAX_HINT_NAME_SIZE 256
-#define SK_ALSA_MAX_HINT_DESC_SIZE 256
-#define SK_ALSA_MAX_HINT_IOID_SIZE 64
+
+#define _MIN(a, b) (((a) < (b)) ? (a) : (b))
+#define _MAX(a, b) (((a) > (b)) ? (a) : (b))
 
 ////////////////////////////////////////////////////////////////////////////////
 // Internal Types
 ////////////////////////////////////////////////////////////////////////////////
-typedef union SkPfnFunctionsIMPL {
-  snd_pcm_sframes_t (*readi_func)(snd_pcm_t *handle, void *buffer, snd_pcm_uframes_t size);
-  snd_pcm_sframes_t (*writei_func)(snd_pcm_t *handle, const void *buffer, snd_pcm_uframes_t size);
-  snd_pcm_sframes_t (*readn_func)(snd_pcm_t *handle, void **bufs, snd_pcm_uframes_t size);
-  snd_pcm_sframes_t (*writen_func)(snd_pcm_t *handle, void **bufs, snd_pcm_uframes_t size);
-} SkPfnFunctionsIMPL;
-
 typedef struct SkLimitsContainerIMPL {
   SkComponentLimits             capture;
   SkComponentLimits             playback;
@@ -58,7 +51,6 @@ typedef struct SkComponent_ALSA {
 typedef struct SkStream_ALSA {
   SkStream_T                    parent;
   snd_pcm_t*                    handle;
-  SkPfnFunctionsIMPL            pfn;
 } SkStream_ALSA;
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -336,72 +328,72 @@ skPopulateComponentLimitsIMPL(
   limits->supportedFormats[SK_FORMAT_ANY] = SK_TRUE;
 
   if (snd_pcm_hw_params_get_buffer_size_max(params, &uframesValue) < 0) {
-    return SK_ERROR_FAILED_QUERYING_DEVICE;
+    return SK_ERROR_DEVICE_QUERY_FAILED;
   }
   limits->maxFrameSize = uframesValue;
 
   if (snd_pcm_hw_params_get_buffer_size_min(params, &uframesValue) < 0) {
-    return SK_ERROR_FAILED_QUERYING_DEVICE;
+    return SK_ERROR_DEVICE_QUERY_FAILED;
   }
   limits->minFrameSize = uframesValue;
 
   if (snd_pcm_hw_params_get_buffer_time_max(params, &uiValue, &iValue) < 0) {
-    return SK_ERROR_FAILED_QUERYING_DEVICE;
+    return SK_ERROR_DEVICE_QUERY_FAILED;
   }
   assignRangeAndDirection(&limits->maxBufferTime, uiValue, iValue);
 
   if (snd_pcm_hw_params_get_buffer_time_min(params, &uiValue, &iValue) < 0) {
-    return SK_ERROR_FAILED_QUERYING_DEVICE;
+    return SK_ERROR_DEVICE_QUERY_FAILED;
   }
   assignRangeAndDirection(&limits->minBufferTime, uiValue, iValue);
 
   if (snd_pcm_hw_params_get_channels_max(params, &uiValue) < 0) {
-    return SK_ERROR_FAILED_QUERYING_DEVICE;
+    return SK_ERROR_DEVICE_QUERY_FAILED;
   }
   limits->maxChannels = uiValue;
 
   if (snd_pcm_hw_params_get_channels_min(params, &uiValue) < 0) {
-    return SK_ERROR_FAILED_QUERYING_DEVICE;
+    return SK_ERROR_DEVICE_QUERY_FAILED;
   }
   limits->minChannels = uiValue;
 
   if (snd_pcm_hw_params_get_period_size_max(params, &uframesValue, &iValue) < 0) {
-    return SK_ERROR_FAILED_QUERYING_DEVICE;
+    return SK_ERROR_DEVICE_QUERY_FAILED;
   }
   assignRangeAndDirection(&limits->maxPeriodSize, uiValue, iValue);
 
   if (snd_pcm_hw_params_get_period_size_min(params, &uframesValue, &iValue) < 0) {
-    return SK_ERROR_FAILED_QUERYING_DEVICE;
+    return SK_ERROR_DEVICE_QUERY_FAILED;
   }
   assignRangeAndDirection(&limits->minPeriodSize, uiValue, iValue);
 
   if (snd_pcm_hw_params_get_period_time_max(params, &uiValue, &iValue) < 0) {
-    return SK_ERROR_FAILED_QUERYING_DEVICE;
+    return SK_ERROR_DEVICE_QUERY_FAILED;
   }
   assignRangeAndDirection(&limits->maxPeriodTime, uiValue, iValue);
 
   if (snd_pcm_hw_params_get_period_time_min(params, &uiValue, &iValue) < 0) {
-    return SK_ERROR_FAILED_QUERYING_DEVICE;
+    return SK_ERROR_DEVICE_QUERY_FAILED;
   }
   assignRangeAndDirection(&limits->minPeriodTime, uiValue, iValue);
 
   if (snd_pcm_hw_params_get_periods_max(params, &uiValue, &iValue) < 0) {
-    return SK_ERROR_FAILED_QUERYING_DEVICE;
+    return SK_ERROR_DEVICE_QUERY_FAILED;
   }
   assignRangeAndDirection(&limits->maxPeriods, uiValue, iValue);
 
   if (snd_pcm_hw_params_get_periods_min(params, &uiValue, &iValue) < 0) {
-    return SK_ERROR_FAILED_QUERYING_DEVICE;
+    return SK_ERROR_DEVICE_QUERY_FAILED;
   }
   assignRangeAndDirection(&limits->minPeriods, uiValue, iValue);
 
   if (snd_pcm_hw_params_get_rate_max(params, &uiValue, &iValue) < 0) {
-    return SK_ERROR_FAILED_QUERYING_DEVICE;
+    return SK_ERROR_DEVICE_QUERY_FAILED;
   }
   assignRangeAndDirection(&limits->maxRate, uiValue, iValue);
 
   if (snd_pcm_hw_params_get_rate_min(params, &uiValue, &iValue) < 0) {
-    return SK_ERROR_FAILED_QUERYING_DEVICE;
+    return SK_ERROR_DEVICE_QUERY_FAILED;
   }
   assignRangeAndDirection(&limits->minRate, uiValue, iValue);
 
@@ -413,7 +405,6 @@ skResolveComponentIMPL(
   SkDevice                            device,
   int                                 deviceId,
   char const*                         identifier,
-  const SkAllocationCallbacks*        pAllocator,
   SkComponent*                        pComponent
 ) {
   SkResult result;
@@ -430,7 +421,7 @@ skResolveComponentIMPL(
 
   // Failed to find the component, so we must construct it
   if (!component) {
-    result = skConstructComponent(device, sizeof(SkComponent_ALSA), pAllocator, &component);
+    result = skConstructComponent(device, sizeof(SkComponent_ALSA), &component);
     if (result != SK_SUCCESS) {
       return result;
     }
@@ -449,7 +440,6 @@ skResolveDeviceIMPL(
   SkHostApi                           hostApi,
   int                                 cardId,
   char const*                         identifier,
-  const SkAllocationCallbacks*        pAllocator,
   SkDevice*                           pDevice
 ) {
   SkResult result;
@@ -465,7 +455,7 @@ skResolveDeviceIMPL(
 
   // Failed to find the device, so we must construct it
   if (!device) {
-    result = skConstructDevice(hostApi, sizeof(SkDevice_ALSA), (cardId >= 0) ? SK_TRUE : SK_FALSE, pAllocator, &device);
+    result = skConstructDevice(hostApi, sizeof(SkDevice_ALSA), (cardId >= 0) ? SK_TRUE : SK_FALSE, &device);
     if (result != SK_SUCCESS) {
       return result;
     }
@@ -483,8 +473,7 @@ static SkResult
 skUpdatePhysicalComponentIMPL(
   snd_ctl_t*                          ctlHandle,
   SkDevice                            device,
-  int                                 deviceId,
-  const SkAllocationCallbacks*        pAllocator
+  int                                 deviceId
 ) {
   int error;
   SkResult result;
@@ -495,7 +484,7 @@ skUpdatePhysicalComponentIMPL(
 
   // Resolve or construct the component
   sprintf(identifier, "hw:%d,%d", dev_cast(device)->card, deviceId);
-  result = skResolveComponentIMPL(device, deviceId, identifier, pAllocator, &component);
+  result = skResolveComponentIMPL(device, deviceId, identifier, &component);
   if (result != SK_SUCCESS) {
     return result;
   }
@@ -529,8 +518,7 @@ skUpdatePhysicalComponentIMPL(
 static SkResult
 skUpdatePhysicalDeviceIMPL(
   SkHostApi                           hostApi,
-  unsigned int                        cardId,
-  const SkAllocationCallbacks*        pAllocator
+  unsigned int                        cardId
 ) {
   int error;
   SkResult result;
@@ -543,7 +531,7 @@ skUpdatePhysicalDeviceIMPL(
 
   // Resolve or construct the device
   sprintf(identifier, "hw:%u", cardId);
-  result = skResolveDeviceIMPL(hostApi, cardId, identifier, pAllocator, &device);
+  result = skResolveDeviceIMPL(hostApi, cardId, identifier, &device);
   if (result != SK_SUCCESS) {
     return result;
   }
@@ -552,7 +540,7 @@ skUpdatePhysicalDeviceIMPL(
   error = snd_ctl_open(&ctlHandle, identifier, 0);
   if (error != 0) {
     SKERROR("ALSA: %s\n", snd_strerror(error));
-    return SK_ERROR_INITIALIZATION_FAILED;
+    return SK_ERROR_DEVICE_QUERY_FAILED;
   }
 
   // Iterate through all of the components on the device
@@ -560,10 +548,10 @@ skUpdatePhysicalDeviceIMPL(
   for (;;) {
     if (snd_ctl_pcm_next_device(ctlHandle, &deviceId) != 0) {
       snd_ctl_close(ctlHandle);
-      return SK_ERROR_FAILED_QUERYING_DEVICE;
+      return SK_ERROR_DEVICE_QUERY_FAILED;
     }
     if (deviceId <= -1) break;
-    opResult = skUpdatePhysicalComponentIMPL(ctlHandle, device, deviceId, pAllocator);
+    opResult = skUpdatePhysicalComponentIMPL(ctlHandle, device, deviceId);
     if (opResult != SK_SUCCESS) {
       result = opResult;
     }
@@ -591,8 +579,7 @@ skUpdatePhysicalDeviceIMPL(
 static SkResult
 skUpdateVirtualDeviceIMPL(
   SkHostApi                           hostApi,
-  void*                               hint,
-  const SkAllocationCallbacks*        pAllocator
+  void*                               hint
 ) {
   char *ioid;
   char *colonPtr;
@@ -615,7 +602,7 @@ skUpdateVirtualDeviceIMPL(
   }
 
   // Resolve or construct the device
-  result = skResolveDeviceIMPL(hostApi, SK_ALSA_VIRTUAL_DEVICE_CARD_ID, deviceName, pAllocator, &device);
+  result = skResolveDeviceIMPL(hostApi, SK_ALSA_VIRTUAL_DEVICE_CARD_ID, deviceName, &device);
   if (result != SK_SUCCESS) {
     return result;
   }
@@ -626,7 +613,7 @@ skUpdateVirtualDeviceIMPL(
   strcpy(device->properties.mixerName, "N/A");
 
   // Resolve or construct the component
-  result = skResolveComponentIMPL(device, SK_ALSA_VIRTUAL_DEVICE_CARD_ID, componentName, pAllocator, &component);
+  result = skResolveComponentIMPL(device, SK_ALSA_VIRTUAL_DEVICE_CARD_ID, componentName, &component);
   if (result != SK_SUCCESS) {
     return result;
   }
@@ -645,46 +632,83 @@ skUpdateVirtualDeviceIMPL(
   return SK_SUCCESS;
 }
 
-
-static snd_pcm_sframes_t
-xrun_recovery(snd_pcm_t *handle, snd_pcm_sframes_t err)
-{
-  // An underrun occurred, open the stream back up and try again
-  if (err == -EPIPE) {
-    SKWARN("An xrun has occurred.\n");
-    err = snd_pcm_prepare(handle);
-    if (err < 0) {
-      return SK_ERROR_FAILED_STREAM_WRITE;
-    }
-    return SK_ERROR_XRUN;
-  }
-  //
-  else if (err == -ESTRPIPE) {
-    SKWARN("Device is not yet ready, try again later.\n");
-    while ((err = snd_pcm_resume(handle)) == -EAGAIN)
-      sleep(1);
-    if (err < 0) {
-      err = snd_pcm_prepare(handle);
-      if (err < 0)
-        SKERROR("Can't recovery from suspend, prepare failed: %s\n", snd_strerror(err));
-    }
-    return 0;
-  }
-  else if (err == -EBADFD) {
-    SKERROR("Not the correct state?\n");
-  }
-  else {
-    SKERROR("We do not know what happened.\n");
-  }
-  return err;
-}
-
 ////////////////////////////////////////////////////////////////////////////////
 // Public API
 ////////////////////////////////////////////////////////////////////////////////
-void skHostApiFree_ALSA(
-  SkHostApi                         hostApi,
-  const SkAllocationCallbacks*      pAllocator
+SkResult skHostApiInit_ALSA(
+  SkInstance                        instance,
+  SkHostApi*                        pHostApi
+) {
+  SkResult result;
+  SkHostApi hostApi;
+
+  // Initialize the Host API's data
+  result = skConstructHostApi(instance, sizeof(SkHostApi_ALSA), &skProcedure_ALSA, &hostApi);
+  if (result != SK_SUCCESS) {
+    return result;
+  }
+
+  // Initialize the Host API's properties
+  strcpy(hostApi->properties.identifier, "alsa");
+  strcpy(hostApi->properties.hostName, "ALSA");
+  strcpy(hostApi->properties.hostNameFull, "Advanced Linux Sound Architecture (ALSA)");
+  strcpy(hostApi->properties.description, "User space library (alsa-lib) to simplify application programming and provide higher level functionality.");
+  hostApi->properties.capabilities = SK_HOST_CAPABILITIES_PCM | SK_HOST_CAPABILITIES_SEQUENCER;
+
+  *pHostApi = hostApi;
+  return SK_SUCCESS;
+}
+
+static SkResult
+skHostApiScan_ALSA(
+  SkHostApi                         hostApi
+) {
+  int card;
+  void** hint;
+  void** hints;
+  SkResult result;
+  SkResult opResult;
+
+  result = SK_SUCCESS;
+
+  // Physical Devices
+  card = -1;
+  for(;;) {
+    // Attempt to open the next card
+    if (snd_card_next(&card) != 0) {
+      return SK_ERROR_DEVICE_QUERY_FAILED;
+    }
+    if (card == -1) break; // Last card
+
+    // Attempt to construct the new card handle
+    opResult = skUpdatePhysicalDeviceIMPL(hostApi, (unsigned int)card);
+    if (opResult != SK_SUCCESS) {
+      result = opResult;
+    }
+  }
+
+  // Virtual Devices
+  {
+    if (snd_device_name_hint(-1, "pcm", &hints) != 0) {
+      return SK_ERROR_DEVICE_QUERY_FAILED;
+    }
+    hint = hints;
+
+    while (*hint) {
+      opResult = skUpdateVirtualDeviceIMPL(hostApi, *hint);
+      if (opResult != SK_SUCCESS) {
+        result = opResult;
+      }
+      ++hint;
+    }
+  }
+
+  return result;
+}
+
+static SkResult
+skHostApiFree_ALSA(
+  SkHostApi                         hostApi
 ) {
   SkStream stream;
   SkStream nextStream;
@@ -703,66 +727,19 @@ void skHostApiFree_ALSA(
       stream = component->pStreams;
       while (stream) {
         nextStream = stream->pNext;
-        SKFREE(stream);
+        SKFREE(stream->pAllocator, stream);
         stream = nextStream;
       }
-      SKFREE(component);
+      SKFREE(component->pAllocator, component);
       component = nextComponent;
     }
-    SKFREE(device);
+    SKFREE(device->pAllocator, device);
     device = nextDevice;
   }
 
   // Free HostApi
-  SKFREE(hostApi);
-}
-
-static SkResult
-skScanDevices_ALSA(
-  SkHostApi                         hostApi,
-  const SkAllocationCallbacks*      pAllocator
-) {
-  int card;
-  void** hint;
-  void** hints;
-  SkResult result;
-  SkResult opResult;
-
-  result = SK_SUCCESS;
-
-  // Physical Devices
-  card = -1;
-  for(;;) {
-    // Attempt to open the next card
-    if (snd_card_next(&card) != 0) {
-      return SK_ERROR_FAILED_QUERYING_DEVICE;
-    }
-    if (card == -1) break; // Last card
-
-    // Attempt to construct the new card handle
-    opResult = skUpdatePhysicalDeviceIMPL(hostApi, (unsigned int)card, pAllocator);
-    if (opResult != SK_SUCCESS) {
-      result = opResult;
-    }
-  }
-
-  // Virtual Devices
-  {
-    if (snd_device_name_hint(-1, "pcm", &hints) != 0) {
-      return SK_ERROR_FAILED_QUERYING_DEVICE;
-    }
-    hint = hints;
-
-    while (*hint) {
-      opResult = skUpdateVirtualDeviceIMPL(hostApi, *hint, pAllocator);
-      if (opResult != SK_SUCCESS) {
-        result = opResult;
-      }
-      ++hint;
-    }
-  }
-
-    return result;
+  SKFREE(hostApi->pAllocator, hostApi);
+  return SK_SUCCESS;
 }
 
 static SkResult
@@ -775,11 +752,199 @@ skGetComponentLimits_ALSA(
   snd_pcm_t *handle;
 
   if (snd_pcm_open(&handle, comp_cast(component)->identifier, toLocalPcmStreamType(streamType), 0) != 0) {
-    return SK_ERROR_FAILED_QUERYING_DEVICE;
+    return SK_ERROR_STREAM_REQUEST_FAILED;
   }
   result = skPopulateComponentLimitsIMPL(handle, pLimits);
   snd_pcm_close(handle);
   return result;
+}
+
+static int
+xrun_recovery(snd_pcm_t *handle, snd_pcm_sframes_t err)
+{
+  switch (err) {
+    // An underrun/overrun occurred, open the stream back up and try again
+    case -EPIPE:
+      err = snd_pcm_prepare(handle);
+      SKWARNIF(err < 0, "Stream was unable to recover from xrun: %s\n", snd_strerror(err));
+      return (err >= 0) ? -SK_ERROR_STREAM_XRUN : -SK_ERROR_STREAM_INVALID;
+    // Device is not yet ready, try again later
+    case -ESTRPIPE:
+      err = snd_pcm_resume(handle);
+      switch (err) {
+        case -EAGAIN:
+          return -SK_ERROR_STREAM_BUSY;
+        default:
+          SKWARN("Stream encountered an unexpected error after resuming: %s\n", snd_strerror(err));
+        case -ENOSYS:
+          err = snd_pcm_prepare(handle);
+          SKWARNIF(err < 0, "Stream was unable to recover from xrun: %s\n", snd_strerror(err));
+          return (err >= 0) ? -SK_ERROR_STREAM_NOT_READY : -SK_ERROR_STREAM_INVALID;
+      }
+    case -EAGAIN:
+      return -SK_ERROR_STREAM_BUSY;
+    case -EBADFD:
+      return -SK_ERROR_STREAM_INVALID;
+    case -ENOTTY:
+    case -ENODEV:
+      return -SK_ERROR_STREAM_LOST;
+    default:
+      SKWARN("Stream is in an unexpected state: (%d) %s\n", (int)err, snd_strerror(err));
+      return -SK_ERROR_STREAM_INVALID;
+  }
+}
+
+#define CHECK(op) if ((op) < 0) { return -SK_ERROR_UNKNOWN; }
+static snd_pcm_sframes_t
+update_stream_state_internal(SkStream_ALSA *stream) {
+  for (;;) {
+    switch (snd_pcm_state(stream->handle)) {
+      case SND_PCM_STATE_OPEN:
+        CHECK(snd_pcm_prepare(stream->handle));
+        return SK_SUCCESS;
+      case SND_PCM_STATE_PREPARED:
+        switch (stream->parent.streamInfo.pcm.streamType) {
+          case SK_STREAM_TYPE_PCM_PLAYBACK:
+            return SK_SUCCESS;
+          case SK_STREAM_TYPE_PCM_CAPTURE:
+            CHECK(snd_pcm_start(stream->handle));
+            break;
+        }
+        break;
+      case SND_PCM_STATE_RUNNING:
+        return SK_SUCCESS;
+      case SND_PCM_STATE_XRUN:
+        return xrun_recovery(stream->handle, -EPIPE);
+      case SND_PCM_STATE_SUSPENDED:
+        return xrun_recovery(stream->handle, -ESTRPIPE);
+      default:
+        return SK_SUCCESS;
+    }
+  }
+}
+
+static snd_pcm_sframes_t
+update_stream_state(SkStream_ALSA *stream) {
+  snd_pcm_sframes_t frames;
+
+  for (;;) {
+
+    // Update the internal state of the stream
+    frames = update_stream_state_internal(stream);
+    if (frames < 0) {
+      return frames;
+    }
+
+    // Handle polling operations if requested
+    if (stream->parent.streamInfo.pcm.streamFlags & SK_STREAM_FLAGS_POLL_AVAILABLE) {
+
+      // See how many frames are available
+      // NOTE: On xrun, we might have to restart the stream
+      frames = snd_pcm_avail(stream->handle);
+      if (frames < 0) {
+        return xrun_recovery(stream->handle, frames);
+      }
+
+      // Handle waiting operation is requested
+      // NOTE: On xrun, we might have to restart the stream
+      if (stream->parent.streamInfo.pcm.streamFlags & SK_STREAM_FLAGS_WAIT_AVAILABLE) {
+        if (!frames) {
+          frames = snd_pcm_wait(stream->handle, -1);
+          if (frames < 0) {
+            return xrun_recovery(stream->handle, frames);
+          }
+          continue;
+        }
+      }
+
+      return frames;
+    }
+
+    // No polling, assume max availability
+    return stream->parent.streamInfo.pcm.bufferSamples;
+  }
+}
+
+#define ALSA_STREAM_OPERATION(fn,cast)                                        \
+snd_pcm_sframes_t err = update_stream_state(stream_cast(stream));             \
+if (err > 0) {                                                                \
+  err = fn(stream_cast(stream)->handle, (cast)pBuffer, _MIN(samples, err));   \
+  if (err < 0) {                                                              \
+    return xrun_recovery(stream_cast(stream)->handle, err);                   \
+  }                                                                           \
+}                                                                             \
+return (int64_t)err
+
+static int64_t
+skStreamWriteInterleaved_ALSA(
+  SkStream                            stream,
+  void const*                         pBuffer,
+  uint32_t                            samples
+) {
+  ALSA_STREAM_OPERATION(snd_pcm_writei, void const*);
+}
+
+static int64_t
+skStreamWriteNoninterleaved_ALSA(
+  SkStream                            stream,
+  void const* const*                  pBuffer,
+  uint32_t                            samples
+) {
+  ALSA_STREAM_OPERATION(snd_pcm_writen, void**);
+}
+
+static int64_t
+skStreamWriteInterleavedMMap_ALSA(
+  SkStream                            stream,
+  void const*                         pBuffer,
+  uint32_t                            samples
+) {
+  ALSA_STREAM_OPERATION(snd_pcm_mmap_writei, void const*);
+}
+
+static int64_t
+skStreamWriteNoninterleavedMMap_ALSA(
+  SkStream                            stream,
+  void const* const*                  pBuffer,
+  uint32_t                            samples
+) {
+  ALSA_STREAM_OPERATION(snd_pcm_mmap_writen, void**);
+}
+
+static int64_t
+skStreamReadInterleaved_ALSA(
+  SkStream                            stream,
+  void*                               pBuffer,
+  uint32_t                            samples
+) {
+  ALSA_STREAM_OPERATION(snd_pcm_readi, void*);
+}
+
+static int64_t
+skStreamReadNoninterleaved_ALSA(
+  SkStream                            stream,
+  void**                              pBuffer,
+  uint32_t                            samples
+) {
+  ALSA_STREAM_OPERATION(snd_pcm_readn, void**);
+}
+
+static int64_t
+skStreamReadInterleavedMMap_ALSA(
+  SkStream                            stream,
+  void*                               pBuffer,
+  uint32_t                            samples
+) {
+  ALSA_STREAM_OPERATION(snd_pcm_mmap_readi, void*);
+}
+
+static int64_t
+skStreamReadNoninterleavedMMap_ALSA(
+  SkStream                            stream,
+  void**                              pBuffer,
+  uint32_t                            samples
+) {
+  ALSA_STREAM_OPERATION(snd_pcm_mmap_readn, void**);
 }
 
 #define PCM_CHECK(call) if ((error = call) < 0) { SKWARNIF(error != -EINVAL, "%s\n", snd_strerror(error)); continue; }
@@ -787,8 +952,7 @@ static SkResult
 skRequestPcmStreamIMPL(
   SkComponent                       component,
   SkPcmStreamRequest*               pStreamRequest,
-  SkStream*                         pStream,
-  const SkAllocationCallbacks*      pAllocator
+  SkStream*                         pStream
 ) {
   int error;
   int iValue;
@@ -805,7 +969,6 @@ skRequestPcmStreamIMPL(
   SkStream stream;
   SkFormat formatType;
   SkFormat formatIterator;
-  SkRangedValue rangedValue;
 
   // Translate to local PCM definitions
   accessMode = toLocalPcmAccessMode(pStreamRequest->accessMode);
@@ -892,7 +1055,7 @@ skRequestPcmStreamIMPL(
   if (formatType == SK_FORMAT_INVALID) {
     snd_pcm_close(pcmHandle);
     snd_pcm_hw_params_free(hwParams);
-    return SK_ERROR_INITIALIZATION_FAILED;
+    return SK_ERROR_STREAM_REQUEST_FAILED;
   }
 
   // Apply the hardware parameters to the PCM stream
@@ -910,36 +1073,39 @@ skRequestPcmStreamIMPL(
     streamInfo.accessMode = pStreamRequest->accessMode;
     PCM_CHECK(snd_pcm_hw_params_get_access(hwParams, &aValue));
     streamInfo.accessType = toSkAccessType(aValue);
+    streamInfo.streamFlags = pStreamRequest->streamFlags;
     PCM_CHECK(snd_pcm_hw_params_get_format(hwParams, &fValue));
     streamInfo.formatType = toSkFormat(fValue);
     streamInfo.formatBits = (uint32_t) snd_pcm_format_physical_width(fValue);
-    PCM_CHECK(snd_pcm_hw_params_get_periods(hwParams, &uiValue, &iValue));
-    streamInfo.periods = uiValue;
     PCM_CHECK(snd_pcm_hw_params_get_channels(hwParams, &uiValue));
     streamInfo.channels = uiValue;
-    PCM_CHECK(snd_pcm_hw_params_get_period_size(hwParams, &ufValue, &iValue));
-    streamInfo.periodSamples = ufValue;
-    PCM_CHECK(snd_pcm_hw_params_get_period_time(hwParams, &uiValue, &iValue));
-    streamInfo.periodTime = uiValue;
-    PCM_CHECK(snd_pcm_hw_params_get_buffer_size(hwParams, &ufValue));
-    streamInfo.bufferSamples = ufValue;
-    PCM_CHECK(snd_pcm_hw_params_get_buffer_time(hwParams, &uiValue, &iValue));
-    streamInfo.bufferTime = uiValue;
     PCM_CHECK(snd_pcm_hw_params_get_rate(hwParams, &uiValue, &iValue));
     streamInfo.sampleRate = uiValue;
     streamInfo.sampleBits = streamInfo.channels * streamInfo.formatBits;
-    streamInfo.bufferBits = streamInfo.bufferSamples * streamInfo.sampleBits;
-    streamInfo.sampleTime = streamInfo.periodTime / streamInfo.periodSamples;
+    streamInfo.sampleTime = (uint32_t)(1000000 / streamInfo.sampleRate);
+    PCM_CHECK(snd_pcm_hw_params_get_periods(hwParams, &uiValue, &iValue));
+    streamInfo.periods = uiValue;
+    PCM_CHECK(snd_pcm_hw_params_get_period_size(hwParams, &ufValue, &iValue));
+    streamInfo.periodSamples = (uint32_t)ufValue;
     streamInfo.periodBits = streamInfo.sampleBits * streamInfo.periodSamples;
+    PCM_CHECK(snd_pcm_hw_params_get_period_time(hwParams, &uiValue, &iValue));
+    streamInfo.periodTime = uiValue;
+    streamInfo.periodTime = (uint32_t)(1000000 * ((float)streamInfo.periodSamples / streamInfo.sampleRate));
+    PCM_CHECK(snd_pcm_hw_params_get_buffer_size(hwParams, &ufValue));
+    streamInfo.bufferSamples = (uint32_t)ufValue;
+    streamInfo.bufferBits = streamInfo.bufferSamples * streamInfo.sampleBits;
+    streamInfo.bufferTime = (uint32_t)(1000000 * ((float)streamInfo.bufferSamples / streamInfo.sampleRate));
     // latency = periodsize * periods / (rate * bytes_per_frame)
-    streamInfo.latency = 8 * streamInfo.periodSamples * streamInfo.periods / (streamInfo.sampleRate * streamInfo.sampleBits);
+    streamInfo.latencyTime = 1000000 * ((float)streamInfo.periods * streamInfo.periodSamples) / (streamInfo.sampleRate);
   } while (SK_FALSE);
   snd_pcm_hw_params_free(hwParams);
 
   // Success! Create the stream -
-  result = skConstructStream(component, sizeof(SkStream_ALSA), pAllocator, &stream);
+  result = skConstructStream(component, sizeof(SkStream_ALSA), &stream);
   if (result != SK_SUCCESS) {
     snd_pcm_close(pcmHandle);
+    snd_pcm_hw_params_free(hwParams);
+    SKWARN("%s\n", snd_strerror(error));
     return result;
   }
   stream->streamInfo.pcm = streamInfo;
@@ -948,16 +1114,16 @@ skRequestPcmStreamIMPL(
     case SK_STREAM_TYPE_PCM_CAPTURE:
       switch (streamInfo.accessType) {
         case SK_ACCESS_TYPE_INTERLEAVED:
-          stream_cast(stream)->pfn.readi_func = &snd_pcm_readi;
+          stream->pcmFunctions.SkStreamReadInterleaved = &skStreamReadInterleaved_ALSA;
           break;
         case SK_ACCESS_TYPE_NONINTERLEAVED:
-          stream_cast(stream)->pfn.readn_func = &snd_pcm_readn;
+          stream->pcmFunctions.SkStreamReadNoninterleaved = &skStreamReadNoninterleaved_ALSA;
           break;
         case SK_ACCESS_TYPE_MMAP_INTERLEAVED:
-          stream_cast(stream)->pfn.readi_func = &snd_pcm_mmap_readi;
+          stream->pcmFunctions.SkStreamReadInterleaved = &skStreamReadInterleavedMMap_ALSA;
           break;
         case SK_ACCESS_TYPE_MMAP_NONINTERLEAVED:
-          stream_cast(stream)->pfn.readn_func = &snd_pcm_mmap_readn;
+          stream->pcmFunctions.SkStreamReadNoninterleaved = &skStreamReadNoninterleavedMMap_ALSA;
           break;
         default:
           break;
@@ -966,16 +1132,16 @@ skRequestPcmStreamIMPL(
     case SK_STREAM_TYPE_PCM_PLAYBACK:
       switch (streamInfo.accessType) {
         case SK_ACCESS_TYPE_INTERLEAVED:
-          stream_cast(stream)->pfn.writei_func = &snd_pcm_writei;
+          stream->pcmFunctions.SkStreamWriteInterleaved = &skStreamWriteInterleaved_ALSA;
           break;
         case SK_ACCESS_TYPE_NONINTERLEAVED:
-          stream_cast(stream)->pfn.writen_func = &snd_pcm_writen;
+          stream->pcmFunctions.SkStreamWriteNoninterleaved = &skStreamWriteNoninterleaved_ALSA;
           break;
         case SK_ACCESS_TYPE_MMAP_INTERLEAVED:
-          stream_cast(stream)->pfn.writei_func = &snd_pcm_mmap_writei;
+          stream->pcmFunctions.SkStreamWriteInterleaved = &skStreamWriteInterleavedMMap_ALSA;
           break;
         case SK_ACCESS_TYPE_MMAP_NONINTERLEAVED:
-          stream_cast(stream)->pfn.writen_func = &snd_pcm_mmap_writen;
+          stream->pcmFunctions.SkStreamWriteNoninterleaved = &skStreamWriteNoninterleavedMMap_ALSA;
           break;
         default:
           break;
@@ -987,104 +1153,29 @@ skRequestPcmStreamIMPL(
   return SK_SUCCESS;
 }
 
-static SkResult skRequestStream_ALSA(
+static SkResult
+skRequestStream_ALSA(
   SkComponent                       component,
   SkStreamRequest*                  pStreamRequest,
-  SkStream*                         pStream,
-  const SkAllocationCallbacks*      pAllocator
+  SkStream*                         pStream
 ) {
   switch (pStreamRequest->streamType) {
     case SK_STREAM_TYPE_PCM_PLAYBACK:
     case SK_STREAM_TYPE_PCM_CAPTURE:
-      return skRequestPcmStreamIMPL(component, &pStreamRequest->pcm, pStream, pAllocator);
+      return skRequestPcmStreamIMPL(component, &pStreamRequest->pcm, pStream);
     case SK_STREAM_TYPE_NONE:
       SKERROR("An SkStreamType other than SK_STREAM_TYPE_NONE must be provided in SkStreamRequest.\n");
-      return SK_ERROR_INITIALIZATION_FAILED;
+      return SK_ERROR_STREAM_REQUEST_FAILED;
   }
 }
 
-static int64_t
-skStreamWriteInterleaved_ALSA(
+static SkResult
+skGetStreamHandle_ALSA(
   SkStream                            stream,
-  void const*                         pBuffer,
-  uint32_t                            samples
+  void**                              pHandle
 ) {
-  snd_pcm_sframes_t err = 0;
-  for (;;) {
-    if ((err = stream_cast(stream)->pfn.writei_func(stream_cast(stream)->handle, pBuffer, samples)) < 0) {
-      SKWARN("Write Error!\n");
-      if (err == -EAGAIN) continue;
-      if ((err = xrun_recovery(stream_cast(stream)->handle, err)) < 0) {
-        return -SK_ERROR_FAILED_STREAM_WRITE;
-      }
-      continue;
-    }
-    break;
-  }
-  return err;
-}
-
-static int64_t
-skStreamWriteNoninterleaved_ALSA(
-  SkStream                            stream,
-  void const* const*                  pBuffer,
-  uint32_t                            samples
-) {
-  snd_pcm_sframes_t err = 0;
-  for (;;) {
-    if ((err = stream_cast(stream)->pfn.writen_func(stream_cast(stream)->handle, (void**)pBuffer, samples)) < 0) {
-      SKWARN("Write Error!\n");
-      if (err == -EAGAIN) continue;
-      if ((err = xrun_recovery(stream_cast(stream)->handle, err)) < 0) {
-        return -SK_ERROR_FAILED_STREAM_WRITE;
-      }
-      continue;
-    }
-    break;
-  }
-  return err;
-}
-
-static int64_t
-skStreamReadInterleaved_ALSA(
-  SkStream                            stream,
-  void*                               pBuffer,
-  uint32_t                            samples
-) {
-  snd_pcm_sframes_t err = 0;
-  for (;;) {
-    if ((err = stream_cast(stream)->pfn.readi_func(stream_cast(stream)->handle, pBuffer, samples)) < 0) {
-      SKWARN("Read Error!\n");
-      if (err == -EAGAIN) continue;
-      if ((err = xrun_recovery(stream_cast(stream)->handle, err)) < 0) {
-        return -SK_ERROR_FAILED_STREAM_WRITE;
-      }
-      continue;
-    }
-    break;
-  }
-  return err;
-}
-
-static int64_t
-skStreamReadNoninterleaved_ALSA(
-  SkStream                            stream,
-  void**                              pBuffer,
-  uint32_t                            samples
-) {
-  snd_pcm_sframes_t err = 0;
-  for (;;) {
-    if ((err = stream_cast(stream)->pfn.readn_func(stream_cast(stream)->handle, pBuffer, samples)) < 0) {
-      SKWARN("Read Error!\n");
-      if (err == -EAGAIN) continue;
-      if ((err = xrun_recovery(stream_cast(stream)->handle, err)) < 0) {
-        return -SK_ERROR_FAILED_STREAM_WRITE;
-      }
-      continue;
-    }
-    break;
-  }
-  return err;
+  *pHandle = stream_cast(stream)->handle;
+  return SK_SUCCESS;
 }
 
 static void
@@ -1109,44 +1200,27 @@ skDestroyStream_ALSA(
     *pStream = (*pStream)->pNext;
   }
 
-  _SKFREE(stream->component->device->hostApi->instance->pAllocator, stream);
+  SKFREE(stream->pAllocator, stream);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// Public API (Initializer)
+// Public Procedure Call
 ////////////////////////////////////////////////////////////////////////////////
-SkResult skHostApiInit_ALSA(
-  SkInstance                        instance,
-  SkHostApi*                        pHostApi,
-  const SkAllocationCallbacks*      pAllocator
-) {
-  SkResult result;
-  SkHostApi hostApi;
-
-  // Initialize the Host API's data
-  result = skConstructHostApi(instance, sizeof(SkHostApi_ALSA), pAllocator, &hostApi);
-  if (result != SK_SUCCESS) {
-    return result;
+SkResult skProcedure_ALSA(SkProcedure procedure, void** params) {
+  switch (procedure) {
+    case SK_PROC_HOSTAPI_INIT:
+      return skHostApiInit_ALSA(SK_PARAMS_HOSTAPI_INIT);
+    case SK_PROC_HOSTAPI_SCAN:
+      return skHostApiScan_ALSA(SK_PARAMS_HOSTAPI_SCAN);
+    case SK_PROC_HOSTAPI_FREE:
+      return skHostApiFree_ALSA(SK_PARAMS_HOSTAPI_FREE);
+    case SK_PROC_COMPONENT_GET_LIMITS:
+      return skGetComponentLimits_ALSA(SK_PARAMS_COMPONENT_LIMITS);
+    case SK_PROC_STREAM_REQUEST:
+      return skRequestStream_ALSA(SK_PARAMS_STREAM_REQUEST);
+    case SK_PROC_STREAM_GET_HANDLE:
+      return skGetStreamHandle_ALSA(SK_PARAMS_STREAM_GET_HANDLE);
+    default:
+      return SK_ERROR_NOT_IMPLEMENTED;
   }
-
-  // Initialize the Host API's properties
-  strcpy(hostApi->properties.identifier, "alsa");
-  strcpy(hostApi->properties.hostName, "ALSA");
-  strcpy(hostApi->properties.hostNameFull, "Advanced Linux Sound Architecture (ALSA)");
-  strcpy(hostApi->properties.description, "User space library (alsa-lib) to simplify application programming and provide higher level functionality.");
-  hostApi->properties.capabilities = SK_HOST_CAPABILITIES_PCM | SK_HOST_CAPABILITIES_SEQUENCER;
-
-  // Initialize the Host API's implementation
-  hostApi->impl.SkHostApiFree = &skHostApiFree_ALSA;
-  hostApi->impl.SkScanDevices = &skScanDevices_ALSA;
-  hostApi->impl.SkGetComponentLimits = &skGetComponentLimits_ALSA;
-  hostApi->impl.SkRequestStream = &skRequestStream_ALSA;
-  hostApi->impl.SkStreamWriteInterleaved = &skStreamWriteInterleaved_ALSA;
-  hostApi->impl.SkStreamWriteNoninterleaved = &skStreamWriteNoninterleaved_ALSA;
-  hostApi->impl.SkStreamReadInterleaved = &skStreamReadInterleaved_ALSA;
-  hostApi->impl.SkStreamReadNoninterleaved = &skStreamReadNoninterleaved_ALSA;
-  hostApi->impl.SkDestroyStream = &skDestroyStream_ALSA;
-
-  *pHostApi = hostApi;
-  return SK_SUCCESS;
 }

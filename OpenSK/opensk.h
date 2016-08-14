@@ -69,20 +69,20 @@ typedef enum SkInstanceCreateFlags {
 typedef enum SkResult {
   SK_SUCCESS = 0,
   SK_INCOMPLETE,
-  SK_UNSUPPORTED,
+  SK_ERROR_UNKNOWN,
+  // Generic System Errors
   SK_ERROR_OUT_OF_HOST_MEMORY,
   SK_ERROR_INITIALIZATION_FAILED,
-  SK_ERROR_EXTENSION_NOT_PRESENT,
-  SK_ERROR_FAILED_QUERYING_DEVICE,
-  SK_ERROR_FAILED_RESOLVING_DEVICE,
-  SK_ERROR_STREAM_REQUEST_FAILED,
-  SK_ERROR_STREAM_REQUEST_UNSUPPORTED,
-  SK_ERROR_STREAM_BUSY,
-  SK_ERROR_FAILED_STREAM_WRITE,
-  SK_ERROR_XRUN,
   SK_ERROR_NOT_IMPLEMENTED,
-  SK_ERROR_INVALID_OBJECT,
-  SK_ERROR_UNKNOWN
+  // Device Results
+  SK_ERROR_DEVICE_QUERY_FAILED,
+  // Stream Results
+  SK_ERROR_STREAM_NOT_READY,
+  SK_ERROR_STREAM_BUSY,
+  SK_ERROR_STREAM_XRUN,
+  SK_ERROR_STREAM_INVALID,
+  SK_ERROR_STREAM_LOST,
+  SK_ERROR_STREAM_REQUEST_FAILED
 } SkResult;
 
 typedef enum SkAllocationScope {
@@ -131,6 +131,12 @@ typedef enum SkAccessMode {
   SK_ACCESS_MODE_BLOCK,
   SK_ACCESS_MODE_NONBLOCK
 } SkAccessMode;
+
+typedef enum SkStreamFlags {
+  SK_STREAM_FLAGS_NONE,
+  SK_STREAM_FLAGS_POLL_AVAILABLE,
+  SK_STREAM_FLAGS_WAIT_AVAILABLE
+} SkStreamFlags;
 
 typedef enum SkFormat {
   SK_FORMAT_INVALID = -1,
@@ -275,6 +281,7 @@ typedef struct SkPcmStreamRequest {
   SkStreamType                      streamType;
   SkAccessType                      accessType;
   SkAccessMode                      accessMode;
+  SkStreamFlags                     streamFlags;
   SkFormat                          formatType;
   uint32_t                          channels;
   uint32_t                          periods;
@@ -291,23 +298,24 @@ typedef union SkStreamRequest {
 } SkStreamRequest;
 
 typedef struct SkPcmStreamInfo {
-  SkStreamType                      streamType;
-  SkAccessMode                      accessMode;
-  SkAccessType                      accessType;
-  SkFormat                          formatType;
+  SkStreamType                      streamType;   // Should be one of the PCM stream types
+  SkAccessMode                      accessMode;   // How the stream should be accessed (block/non-block)
+  SkAccessType                      accessType;   // Configuration for reading/writing data
+  SkStreamFlags                     streamFlags;  // Configuration for misc. runtime options.
+  SkFormat                          formatType;   // The underlying type of the PCM stream
   uint32_t                          formatBits;   // Number of bits in the format
-  uint32_t                          periods;      // Number of periods
   uint32_t                          channels;     // Number of channels in a sample
+  uint32_t                          sampleRate;   // Number of samples per second
   uint32_t                          sampleBits;   // Number of bits in a sample
-  uint32_t                          sampleTime;   // Time in microseconds of a sample
-  uint32_t                          periodSamples;// Number of utils in a period
+  uint32_t                          sampleTime;   // Time in microseconds of a sample (approx.)
+  uint32_t                          periods;      // Number of periods
+  uint32_t                          periodSamples;// Number of samples in a period
   uint32_t                          periodBits;   // Number of bits in a period
   uint32_t                          periodTime;   // Time in microseconds of a period
-  uint32_t                          bufferSamples;// Number of utils in the back-buffer
+  uint32_t                          bufferSamples;// Number of samples in the back-buffer
   uint32_t                          bufferBits;   // Number of bits in the back-buffer
   uint32_t                          bufferTime;   // Time in microseconds in the back-buffer
-  uint32_t                          sampleRate;   // Number of samples per second
-  uint32_t                          latency;
+  uint32_t                          latencyTime;  // Time in microseconds worth of latency
 } SkPcmStreamInfo;
 
 typedef union SkStreamInfo {
@@ -401,6 +409,10 @@ SKAPI_ATTR SkResult SKAPI_CALL skRequestStream(
 SKAPI_ATTR void SKAPI_CALL skGetStreamInfo(
   SkStream                          stream,
   SkStreamInfo*                     pStreamInfo
+);
+
+SKAPI_ATTR void* SKAPI_CALL skGetStreamHandle(
+  SkStream                          stream
 );
 
 SKAPI_ATTR int64_t SKAPI_CALL skStreamWriteInterleaved(

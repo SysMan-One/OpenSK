@@ -207,18 +207,49 @@ destructLayout(Layout *layout) {
 /*******************************************************************************
  * Sort Functions
  ******************************************************************************/
+#define less(a, b) (strcmp(skStringDataUTL(a.displayName), skStringDataUTL(b.displayName)) < 0)
+#define swap(a, b) tmp = a; a = b; b = tmp
+static size_t
+partitionStrcmp(DisplayItem *items, size_t lowIdx, size_t highIdx) {
+  DisplayItem* pivot;
+  DisplayItem tmp;
+
+  // Note: Even though lowIdx might underflow, the next operation corrects it.
+  //       This makes the unchecked --lowIdx acceptable (likewise with highIdx overflow).
+  //       Another point is that the pivot will always change after the first swap.
+  //       This isn't terrible because the sorting will still happen - just not "quicksort".
+  pivot = &items[lowIdx];
+  --lowIdx;
+  ++highIdx;
+  for (;;) {
+    do {
+      ++lowIdx;
+    } while (less(items[lowIdx], (*pivot)));
+    do {
+      --highIdx;
+    } while (less((*pivot), items[highIdx]));
+    if (lowIdx >= highIdx) return highIdx;
+    swap(items[lowIdx], items[highIdx]);
+  }
+}
+#undef less
+#undef swap
+
+static void
+quicksortStrcmp(DisplayItem *items, size_t lowIdx, size_t highIdx) {
+  size_t pivotIdx;
+  if (lowIdx < highIdx) {
+    pivotIdx = partitionStrcmp(items, lowIdx, highIdx);
+    quicksortStrcmp(items, lowIdx, pivotIdx);
+    quicksortStrcmp(items, pivotIdx + 1, highIdx);
+  }
+}
+
+
 static void
 sortStrcmp(DisplayItem *items, size_t itemCount) {
-  DisplayItem tmp;
-  uint32_t idx, ddx;
-  for (idx = 0; idx < itemCount; ++idx) {
-    for (ddx = idx + 1; ddx < itemCount; ++ddx) {
-      if (strcmp(skStringDataUTL(items[idx].displayName), skStringDataUTL(items[ddx].displayName)) > 0) {
-        tmp = items[ddx];
-        items[ddx] = items[idx];
-        items[idx] = tmp;
-      }
-    }
+  if (itemCount > 1) {
+    quicksortStrcmp(items, 0, itemCount - 1);
   }
 }
 

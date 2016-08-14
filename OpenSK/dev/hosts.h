@@ -13,113 +13,48 @@ extern "C" {
 #endif // __cplusplus
 
 ////////////////////////////////////////////////////////////////////////////////
-// Internal Types
+// Host API
 ////////////////////////////////////////////////////////////////////////////////
-typedef SkResult (SKAPI_PTR *PFN_skHostApiInit)(
-  SkInstance                        instance,
-  SkHostApi*                        pHostApi,
-  const SkAllocationCallbacks*      pAllocator
-);
+typedef enum SkProcedure {
+  SK_PROC_NONE,
+  SK_PROC_HOSTAPI_INIT,
+  SK_PROC_HOSTAPI_FREE,
+  SK_PROC_HOSTAPI_SCAN,
+  SK_PROC_COMPONENT_GET_LIMITS, // Deprecated
+  SK_PROC_STREAM_REQUEST,
+  SK_PROC_STREAM_GET_HANDLE,
+  SK_PROC_STREAM_DESTROY
+} SkProcedure;
 
-typedef void (SKAPI_PTR *PFN_skHostApiFree)(
-  SkHostApi                         hostApi,
-  const SkAllocationCallbacks*      pAllocator
-);
+typedef SkResult (SKAPI_PTR *PFN_skProcedure)(SkProcedure procedure, void** params);
+#define DECLARE_HOST_API(name) SkResult skProcedure_##name(SkProcedure procedure, void** params);
 
-typedef SkResult (SKAPI_PTR *PFN_skScanDevices)(
-  SkHostApi                         hostApi,
-  const SkAllocationCallbacks*      pAllocator
-);
+// Parameter Unpacking
+#define SK_PARAMS_HOSTAPI_INIT (SkInstance)params[0], (SkHostApi*)params[1]
+#define SK_PARAMS_HOSTAPI_SCAN (SkHostApi)params[0]
+#define SK_PARAMS_HOSTAPI_FREE (SkHostApi)params[0]
+#define SK_PARAMS_COMPONENT_LIMITS (SkComponent)params[0], *(SkStreamType*)params[1], (SkComponentLimits*)params[2]
+#define SK_PARAMS_STREAM_REQUEST (SkComponent)params[0], (SkStreamRequest*)params[1], (SkStream*)params[2]
+#define SK_PARAMS_STREAM_GET_HANDLE (SkStream)params[0], (void**)&params[1]
 
-typedef SkResult (SKAPI_PTR *PFN_skGetComponentLimits)(
-  SkComponent                       component,
-  SkStreamType                      streamType,
-  SkComponentLimits*                pLimits
-);
+// Critical Functions
+typedef int64_t (SKAPI_PTR *PFN_skStreamWriteInterleaved)(SkStream stream, void const* pBuffer, uint32_t samples);
+typedef int64_t (SKAPI_PTR *PFN_skStreamWriteNoninterleaved)(SkStream stream, void const* const* pBuffer, uint32_t samples);
+typedef int64_t (SKAPI_PTR *PFN_skStreamReadInterleaved)(SkStream stream, void* pBuffer, uint32_t samples);
+typedef int64_t (SKAPI_PTR *PFN_skStreamReadNoninterleaved)(SkStream stream, void** pBuffer, uint32_t samples);
 
-typedef SkResult (SKAPI_PTR *PFN_skRequestStream)(
-  SkComponent                       component,
-  SkStreamRequest*                  pStreamRequest,
-  SkStream*                         pStream,
-  const SkAllocationCallbacks*      pAllocator
-);
-
-typedef int64_t (SKAPI_PTR *PFN_skStreamWriteInterleaved)(
-  SkStream                          stream,
-  void const*                       pBuffer,
-  uint32_t                          samples
-);
-
-typedef int64_t (SKAPI_PTR *PFN_skStreamWriteNoninterleaved)(
-  SkStream                          stream,
-  void const* const*                pBuffer,
-  uint32_t                          samples
-);
-
-typedef int64_t (SKAPI_PTR *PFN_skStreamReadInterleaved)(
-  SkStream                          stream,
-  void*                             pBuffer,
-  uint32_t                          samples
-);
-
-typedef int64_t (SKAPI_PTR *PFN_skStreamReadNoninterleaved)(
-  SkStream                          stream,
-  void**                            pBuffer,
-  uint32_t                          samples
-);
-
-typedef void (SKAPI_PTR *PFN_skDestroyStream)(
-  SkStream                          stream,
-  SkBool32                          drain
-);
-
-#define DECLARE_HOST_API(name)              \
-SkResult skHostApiInit_##name(              \
-  SkInstance                   instance,    \
-  SkHostApi*                   pHostApi,    \
-  const SkAllocationCallbacks* pAllocator   \
-);
-
-typedef struct SkHostApiImpl {
-  PFN_skHostApiFree                         SkHostApiFree;
-  PFN_skScanDevices                         SkScanDevices;
-  PFN_skGetComponentLimits                  SkGetComponentLimits;
-  PFN_skRequestStream                       SkRequestStream;
-  PFN_skStreamWriteInterleaved              SkStreamWriteInterleaved;
-  PFN_skStreamWriteNoninterleaved           SkStreamWriteNoninterleaved;
-  PFN_skStreamReadInterleaved               SkStreamReadInterleaved;
-  PFN_skStreamReadNoninterleaved            SkStreamReadNoninterleaved;
-  PFN_skDestroyStream                       SkDestroyStream;
-} SkHostApiImpl;
+// Host API list
+DECLARE_HOST_API(ALSA);
 
 ////////////////////////////////////////////////////////////////////////////////
 // Internal Types
 ////////////////////////////////////////////////////////////////////////////////
-typedef struct SkHostApi_T {
-  SkObjectType            objectType;
-  SkInstance              instance;
-  SkHostApiImpl           impl;
-  SkHostApiProperties     properties;
-  SkDevice                pDevices;
-  SkHostApi               pNext;
-} SkHostApi_T;
-
-typedef struct SkDevice_T {
-  SkObjectType            objectType;
-  SkHostApi               hostApi;
-  SkDevice                pNext;
-  SkComponent             pComponents;
-  SkStream                pStreams;
-  SkDeviceProperties      properties;
-} SkDevice_T;
-
-typedef struct SkComponent_T {
-  SkObjectType            objectType;
-  SkComponentProperties   properties;
-  SkDevice                device;
-  SkStream                pStreams;
-  SkComponent             pNext;
-} SkComponent_T;
+typedef union SkPcmFunctions_T {
+  PFN_skStreamWriteInterleaved      SkStreamWriteInterleaved;
+  PFN_skStreamWriteNoninterleaved   SkStreamWriteNoninterleaved;
+  PFN_skStreamReadInterleaved       SkStreamReadInterleaved;
+  PFN_skStreamReadNoninterleaved    SkStreamReadNoninterleaved;
+} SkPcmFunctions_T;
 
 typedef struct SkInstance_T {
   SkObjectType                  objectType;
@@ -129,11 +64,45 @@ typedef struct SkInstance_T {
   const SkAllocationCallbacks*  pAllocator;
 } SkInstance_T;
 
+typedef struct SkHostApi_T {
+  SkObjectType                  objectType;
+  SkInstance                    instance;
+  PFN_skProcedure               proc;
+  SkHostApiProperties           properties;
+  SkDevice                      pDevices;
+  SkHostApi                     pNext;
+  const SkAllocationCallbacks*  pAllocator;
+} SkHostApi_T;
+
+typedef struct SkDevice_T {
+  SkObjectType                  objectType;
+  SkHostApi                     hostApi;
+  PFN_skProcedure               proc;
+  SkDevice                      pNext;
+  SkComponent                   pComponents;
+  SkStream                      pStreams;
+  SkDeviceProperties            properties;
+  const SkAllocationCallbacks*  pAllocator;
+} SkDevice_T;
+
+typedef struct SkComponent_T {
+  SkObjectType                  objectType;
+  SkComponentProperties         properties;
+  PFN_skProcedure               proc;
+  SkDevice                      device;
+  SkStream                      pStreams;
+  SkComponent                   pNext;
+  const SkAllocationCallbacks*  pAllocator;
+} SkComponent_T;
+
 typedef struct SkStream_T {
   SkObjectType                  objectType;
+  SkPcmFunctions_T              pcmFunctions;
   SkStream                      pNext;
+  PFN_skProcedure               proc;
   SkComponent                   component;
   SkStreamInfo                  streamInfo;
+  const SkAllocationCallbacks*  pAllocator;
 } SkStream_T;
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -152,7 +121,7 @@ SKAPI_ATTR SkResult SKAPI_CALL skGenerateComponentIdentifier(
 SKAPI_ATTR SkResult SKAPI_CALL skConstructHostApi(
   SkInstance                    instance,
   size_t                        hostApiSize,
-  const SkAllocationCallbacks*  pAllocator,
+  PFN_skProcedure               proc,
   SkHostApi*                    pHostApi
 );
 
@@ -160,21 +129,18 @@ SKAPI_ATTR SkResult SKAPI_CALL skConstructDevice(
   SkHostApi                     hostApi,
   size_t                        deviceSize,
   SkBool32                      isPhysical,
-  const SkAllocationCallbacks*  pAllocator,
   SkDevice*                     pDevice
 );
 
 SKAPI_ATTR SkResult SKAPI_CALL skConstructComponent(
   SkDevice                      device,
   size_t                        componentSize,
-  const SkAllocationCallbacks*  pAllocator,
   SkComponent*                  pComponent
 );
 
 SKAPI_ATTR SkResult SKAPI_CALL skConstructStream(
   SkComponent                   component,
   size_t                        streamSize,
-  const SkAllocationCallbacks*  pAllocator,
   SkStream*                     pStream
 );
 
@@ -183,10 +149,6 @@ SKAPI_ATTR SkBool32 SKAPI_CALL skEnumerateFormats(
   SkFormat*                     pIterator,
   SkFormat*                     pValue
 );
-////////////////////////////////////////////////////////////////////////////////
-// Host API
-////////////////////////////////////////////////////////////////////////////////
-DECLARE_HOST_API(ALSA);
 
 #ifdef    __cplusplus
 }

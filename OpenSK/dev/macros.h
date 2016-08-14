@@ -6,8 +6,7 @@
 #ifndef   OPENSK_DEV_MACROS_H
 #define   OPENSK_DEV_MACROS_H 1
 
-#define SKALLOC(size, scope) pAllocator->pfnAllocation(pAllocator->pUserData, size, 0, scope)
-#define _SKFREE(in, ptr) in->pfnFree(in->pUserData, ptr)
-#define SKFREE(ptr) _SKFREE(pAllocator, ptr)
+#define SKALLOC(in, size, scope) in->pfnAllocation(in->pUserData, size, 0, scope)
+#define SKFREE(in, ptr) in->pfnFree(in->pUserData, ptr)
 
 #endif // OPENSK_DEV_MACROS_H

@@ -10,7 +10,6 @@
 #include "dev/macros.h"
 #include <stdlib.h>
 #include <string.h>
-#include <stdio.h>
 
 ////////////////////////////////////////////////////////////////////////////////
 // Internal Types
@@ -40,8 +39,8 @@ SkAllocationCallbacks SkDefaultAllocationCallbacks = {
   &SkDefaultFreeFunction
 };
 
-#define BIND_HOSTAPI(name) &skHostApiInit_##name
-static const PFN_skHostApiInit hostApiInitializers[] = {
+#define BIND_HOSTAPI(name) &skProcedure_##name
+static const PFN_skProcedure hostApiProcedures[] = {
 #ifdef HOST_ALSA
   BIND_HOSTAPI(ALSA),
 #endif
@@ -207,11 +206,11 @@ skGenerateComponentIdentifier(char *identifier, SkComponent component) {
 }
 
 SKAPI_ATTR SkResult SKAPI_CALL
-skConstructHostApi(SkInstance instance, size_t hostApiSize, const SkAllocationCallbacks* pAllocator, SkHostApi* pHostApi) {
+skConstructHostApi(SkInstance instance, size_t hostApiSize, PFN_skProcedure proc, SkHostApi* pHostApi) {
   SkHostApi hostApi;
 
   // Allocate the hostApi
-  hostApi = SKALLOC(hostApiSize, SK_SYSTEM_ALLOCATION_SCOPE_HOST_API);
+  hostApi = SKALLOC(instance->pAllocator, hostApiSize, SK_SYSTEM_ALLOCATION_SCOPE_HOST_API);
   if (!hostApi) {
     return SK_ERROR_OUT_OF_HOST_MEMORY;
   }
@@ -220,6 +219,8 @@ skConstructHostApi(SkInstance instance, size_t hostApiSize, const SkAllocationCa
   memset(hostApi, 0, hostApiSize);
   hostApi->objectType = SK_OBJECT_TYPE_HOST_API;
   hostApi->instance = instance;
+  hostApi->pAllocator = instance->pAllocator;
+  hostApi->proc = proc;
 
   // Add to the instance
   hostApi->pNext = instance->hostApi;
@@ -230,12 +231,12 @@ skConstructHostApi(SkInstance instance, size_t hostApiSize, const SkAllocationCa
 }
 
 SKAPI_ATTR SkResult SKAPI_CALL
-skConstructDevice(SkHostApi hostApi, size_t deviceSize, SkBool32 isPhysical, const SkAllocationCallbacks* pAllocator, SkDevice *pDevice) {
+skConstructDevice(SkHostApi hostApi, size_t deviceSize, SkBool32 isPhysical, SkDevice *pDevice) {
   SkResult result;
   SkDevice device;
 
   // Allocate the device
-  device = SKALLOC(deviceSize, SK_SYSTEM_ALLOCATION_SCOPE_DEVICE);
+  device = SKALLOC(hostApi->pAllocator, deviceSize, SK_SYSTEM_ALLOCATION_SCOPE_DEVICE);
   if (!device) {
     return SK_ERROR_OUT_OF_HOST_MEMORY;
   }
@@ -245,9 +246,11 @@ skConstructDevice(SkHostApi hostApi, size_t deviceSize, SkBool32 isPhysical, con
   device->objectType = SK_OBJECT_TYPE_DEVICE;
   device->hostApi = hostApi;
   device->properties.isPhysical = isPhysical;
+  device->pAllocator = hostApi->pAllocator;
+  device->proc = hostApi->proc;
   result = skGenerateDeviceIdentifier(device->properties.identifier, device);
   if (result != SK_SUCCESS) {
-    SKFREE(device);
+    SKFREE(hostApi->pAllocator, device);
     return result;
   }
 
@@ -260,12 +263,12 @@ skConstructDevice(SkHostApi hostApi, size_t deviceSize, SkBool32 isPhysical, con
 }
 
 SKAPI_ATTR SkResult SKAPI_CALL
-skConstructComponent(SkDevice device, size_t componentSize, const SkAllocationCallbacks* pAllocator, SkComponent *pComponent) {
+skConstructComponent(SkDevice device, size_t componentSize, SkComponent *pComponent) {
   SkResult result;
   SkComponent component;
 
   // Allocate the component
-  component = SKALLOC(componentSize, SK_SYSTEM_ALLOCATION_SCOPE_DEVICE);
+  component = SKALLOC(device->pAllocator, componentSize, SK_SYSTEM_ALLOCATION_SCOPE_DEVICE);
   if (!component) {
     return SK_ERROR_OUT_OF_HOST_MEMORY;
   }
@@ -274,9 +277,11 @@ skConstructComponent(SkDevice device, size_t componentSize, const SkAllocationCa
   memset(component, 0, componentSize);
   component->objectType = SK_OBJECT_TYPE_COMPONENT;
   component->device = device;
+  component->pAllocator = device->pAllocator;
+  component->proc = device->proc;
   result = skGenerateComponentIdentifier(component->properties.identifier, component);
   if (result != SK_SUCCESS) {
-    SKFREE(component);
+    SKFREE(device->pAllocator, component);
     return result;
   }
 
@@ -291,14 +296,13 @@ skConstructComponent(SkDevice device, size_t componentSize, const SkAllocationCa
 SKAPI_ATTR SkResult SKAPI_CALL skConstructStream(
   SkComponent                   component,
   size_t                        streamSize,
-  const SkAllocationCallbacks*  pAllocator,
   SkStream*                     pStream
 ) {
   SkResult result;
   SkStream stream;
 
   // Allocate the device
-  stream = SKALLOC(streamSize, SK_SYSTEM_ALLOCATION_SCOPE_STREAM);
+  stream = SKALLOC(component->pAllocator, streamSize, SK_SYSTEM_ALLOCATION_SCOPE_STREAM);
   if (!stream) {
     return SK_ERROR_OUT_OF_HOST_MEMORY;
   }
@@ -307,6 +311,8 @@ SKAPI_ATTR SkResult SKAPI_CALL skConstructStream(
   memset(stream, 0, streamSize);
   stream->objectType = SK_OBJECT_TYPE_STREAM;
   stream->component = component;
+  stream->pAllocator = component->pAllocator;
+  stream->proc = component->proc;
 
   // Add to the component
   stream->pNext = component->pStreams;
@@ -444,6 +450,7 @@ SKAPI_ATTR SkBool32 SKAPI_CALL skEnumerateFormats(
   *pValue = SK_FORMAT_INVALID;
   return SK_FALSE;
 }
+
 ////////////////////////////////////////////////////////////////////////////////
 // Public API
 ////////////////////////////////////////////////////////////////////////////////
@@ -455,11 +462,11 @@ SKAPI_ATTR SkResult SKAPI_CALL skCreateInstance(
   SkResult result = SK_SUCCESS;
   SkResult opResult;
   SkHostApi hostApi;
-  const PFN_skHostApiInit* hostApiInitializer;
+  const PFN_skProcedure* hostApiProcedure;
   if (!pAllocator) pAllocator = &SkDefaultAllocationCallbacks;
 
   // Allocate all of the required fields of SkInstance_T
-  SkInstance instance = SKALLOC(sizeof(SkInstance_T), SK_SYSTEM_ALLOCATION_SCOPE_INSTANCE);
+  SkInstance instance = SKALLOC(pAllocator, sizeof(SkInstance_T), SK_SYSTEM_ALLOCATION_SCOPE_INSTANCE);
   if (!instance) {
     return SK_ERROR_OUT_OF_HOST_MEMORY;
   }
@@ -472,13 +479,14 @@ SKAPI_ATTR SkResult SKAPI_CALL skCreateInstance(
   instance->instanceFlags = pCreateInfo->flags;
 
   // Initialize all compiled and supported SkHostApi information
-  hostApiInitializer = hostApiInitializers;
-  while (*hostApiInitializer) {
-    opResult = (*hostApiInitializer)(instance, &hostApi, pAllocator);
+  hostApiProcedure = hostApiProcedures;
+  while (*hostApiProcedure) {
+    void* params[] = { instance, &hostApi };
+    opResult = (*hostApiProcedure)(SK_PROC_HOSTAPI_INIT, params);
     if (opResult != SK_SUCCESS) {
       result = SK_INCOMPLETE;
     }
-    ++hostApiInitializer;
+    ++hostApiProcedure;
   }
 
   *pInstance = instance;
@@ -495,12 +503,13 @@ SKAPI_ATTR void SKAPI_CALL skDestroyInstance(
   hostApi = instance->hostApi;
   while (hostApi) {
     nextHostApi = hostApi->pNext;
-    hostApi->impl.SkHostApiFree(hostApi, instance->pAllocator);
+    void* params[] = { hostApi };
+    hostApi->proc(SK_PROC_HOSTAPI_FREE, params);
     hostApi = nextHostApi;
   }
   instance->hostApi = SK_NULL_HANDLE;
 
-  _SKFREE(instance->pAllocator, instance);
+  SKFREE(instance->pAllocator, instance);
 }
 
 static void
@@ -638,7 +647,8 @@ SKAPI_ATTR SkResult SKAPI_CALL skScanDevices(
   virtualComponents = 0;
 
   // Count Devices and Components
-  result = hostApi->impl.SkScanDevices(hostApi, hostApi->instance->pAllocator);
+  void* params[] = { hostApi };
+  result = hostApi->proc(SK_PROC_HOSTAPI_SCAN, params);
   if (result == SK_SUCCESS) {
     device = hostApi->pDevices;
     while (device) {
@@ -767,9 +777,8 @@ SKAPI_ATTR SkResult SKAPI_CALL skGetComponentLimits(
   SkStreamType                      streamType,
   SkComponentLimits*                pLimits
 ) {
-  return component->device->hostApi->impl.SkGetComponentLimits(
-    component, streamType, pLimits
-  );
+  void* params[] = { component, &streamType, pLimits };
+  return component->proc(SK_PROC_COMPONENT_GET_LIMITS, params);
 }
 
 SKAPI_ATTR SkResult SKAPI_CALL skRequestStream(
@@ -777,9 +786,8 @@ SKAPI_ATTR SkResult SKAPI_CALL skRequestStream(
   SkStreamRequest*                  pStreamRequest,
   SkStream*                         pStream
 ) {
-  return component->device->hostApi->impl.SkRequestStream(
-      component, pStreamRequest, pStream, component->device->hostApi->instance->pAllocator
-  );
+  void* params[] = { component, pStreamRequest, pStream };
+  return component->proc(SK_PROC_STREAM_REQUEST, params);
 }
 
 SKAPI_ATTR void SKAPI_CALL skGetStreamInfo(
@@ -789,17 +797,22 @@ SKAPI_ATTR void SKAPI_CALL skGetStreamInfo(
   *pStreamInfo = stream->streamInfo;
 }
 
+SKAPI_ATTR void* SKAPI_CALL skGetStreamHandle(
+  SkStream                          stream
+) {
+  SkResult result;
+  void* params[] = { stream, NULL };
+  result = stream->proc(SK_PROC_STREAM_GET_HANDLE, params);
+  return (result == SK_SUCCESS) ? params[1] : NULL;
+}
+
 SKAPI_ATTR int64_t SKAPI_CALL skStreamWriteInterleaved(
   SkStream                          stream,
   void const*                       pBuffer,
   uint32_t                          samples
 ) {
   SKASSERT(stream->streamInfo.streamType == SK_STREAM_TYPE_PCM_PLAYBACK, "Attempted to write to a non-write or non-PCM stream.");
-  return stream->component->device->hostApi->impl.SkStreamWriteInterleaved(
-    stream,
-    pBuffer,
-    samples
-  );
+  return stream->pcmFunctions.SkStreamWriteInterleaved(stream, pBuffer, samples);
 }
 
 SKAPI_ATTR int64_t SKAPI_CALL skStreamWriteNoninterleaved(
@@ -808,11 +821,7 @@ SKAPI_ATTR int64_t SKAPI_CALL skStreamWriteNoninterleaved(
   uint32_t                          samples
 ) {
   SKASSERT(stream->streamInfo.streamType == SK_STREAM_TYPE_PCM_PLAYBACK, "Attempted to write to a non-write or non-PCM stream.");
-  return stream->component->device->hostApi->impl.SkStreamWriteNoninterleaved(
-    stream,
-    pBuffer,
-    samples
-  );
+  return stream->pcmFunctions.SkStreamWriteNoninterleaved(stream, pBuffer, samples);
 }
 
 SKAPI_ATTR int64_t SKAPI_CALL skStreamReadInterleaved(
@@ -820,12 +829,8 @@ SKAPI_ATTR int64_t SKAPI_CALL skStreamReadInterleaved(
   void*                             pBuffer,
   uint32_t                          samples
 ) {
-  SKASSERT(stream->streamInfo.streamType == SK_STREAM_TYPE_PCM_CAPTURE, "Attempted to read from a non-capture or non-PCM stream.");
-  return stream->component->device->hostApi->impl.SkStreamReadInterleaved(
-    stream,
-    pBuffer,
-    samples
-  );
+  SKASSERT(stream->streamInfo.streamType == SK_STREAM_TYPE_PCM_CAPTURE, "Attempted to read from a non-read or non-PCM stream.");
+  return stream->pcmFunctions.SkStreamReadInterleaved(stream, pBuffer, samples);
 }
 
 SKAPI_ATTR int64_t SKAPI_CALL skStreamReadNoninterleaved(
@@ -833,22 +838,16 @@ SKAPI_ATTR int64_t SKAPI_CALL skStreamReadNoninterleaved(
   void**                            pBuffer,
   uint32_t                          samples
 ) {
-  SKASSERT(stream->streamInfo.streamType == SK_STREAM_TYPE_PCM_CAPTURE, "Attempted to read from a non-capture or non-PCM stream.");
-  return stream->component->device->hostApi->impl.SkStreamReadNoninterleaved(
-    stream,
-    pBuffer,
-    samples
-  );
+  SKASSERT(stream->streamInfo.streamType == SK_STREAM_TYPE_PCM_CAPTURE, "Attempted to read from a non-read or non-PCM stream.");
+  return stream->pcmFunctions.SkStreamReadNoninterleaved(stream, pBuffer, samples);
 }
 
 SKAPI_ATTR void SKAPI_CALL skDestroyStream(
   SkStream                          stream,
   SkBool32                          drain
 ) {
-  stream->component->device->hostApi->impl.SkDestroyStream(
-    stream,
-    drain
-  );
+  void* params[] = { stream, &drain };
+  stream->proc(SK_PROC_STREAM_DESTROY, params);
 }
 
 ////////////////////////////////////////////////////////////////////////////////

@@ -1,16 +1,17 @@
 /*******************************************************************************
  * OpenSK - All content 2016 Trent Reed, all rights reserved.
  *------------------------------------------------------------------------------
- * OpenSK sample application (iterates audio devices).
+ * OpenSK sample application (duplicates data across files and streams).
  *------------------------------------------------------------------------------
- * A high-level overview of how this application works is by first resolving
- * all SkObjects passed into the skls utility. Then, for each SkObject we follow
- * the same pattern (display* -> constructLayout -> print*).
+ * A high-level overview of how this application works is by aggregating all
+ * input information (files, streams, etc.) and streaming output to one or more
+ * files, streams, or ttys.
  ******************************************************************************/
 
 // OpenSK Headers
 #include <OpenSK/opensk.h>
 #include <OpenSK/ext/utils.h>
+#include <OpenSK/ext/ringbuffer.h>
 
 // C99 Headers
 #include <stdio.h>
@@ -18,6 +19,7 @@
 #include <stdlib.h>
 #include <inttypes.h>
 #include <ctype.h>
+#include <opensk.h>
 
 /*******************************************************************************
  * Macro Definitions
@@ -79,12 +81,19 @@ typedef struct DataSet {
 
 typedef struct TimeValue {
   TimeUnits units;
-  uint32_t  amount;
+  size_t    amount;
 } TimeValue;
 
 typedef struct DataDuplicator {
   SkBool32 f_debug;
   TimeValue delay;
+  TimeValue maxInputLatency;
+  TimeValue maxOutputLatency;
+  TimeValue minHardwareLatency;
+  TimeValue maxHardwareLatency;
+  TimeValue hardwareLatency;
+  TimeValue softwareLatency;
+  TimeValue roundTripLatency;
   TimeValue duration;
   DataSet in;
   DataSet out;
@@ -92,105 +101,6 @@ typedef struct DataDuplicator {
   SkStreamRequest inRequest;
   SkStreamRequest outRequest;
 } DataDuplicator;
-
-// TODO: Re-code this piece of junk ring-buffer, and move into external lib. (skx?)
-struct RingBuffer {
-  void* capacityBegin;
-  void* capacityEnd;
-  void* dataBegin;
-  void* dataEnd;
-};
-typedef struct RingBuffer RingBuffer[1];
-
-void ringBufferInit(RingBuffer rb, size_t size) {
-  rb->capacityBegin = rb->dataBegin = rb->dataEnd = malloc(size);
-  rb->capacityEnd = rb->capacityBegin + size;
-}
-
-void ringBufferFree(RingBuffer rb) {
-  free(rb->capacityBegin);
-}
-
-size_t ringBufferGetRemainingContiguousSpace(RingBuffer rb) {
-  if (rb->dataEnd >= rb->dataBegin)
-    return (rb->capacityEnd - rb->dataEnd);
-  return (rb->dataBegin - rb->dataEnd);
-}
-
-size_t ringBufferGetRemainingContiguousData(RingBuffer rb) {
-  if (rb->dataEnd >= rb->dataBegin)
-    return (rb->dataEnd - rb->dataBegin);
-  return (rb->dataEnd - rb->capacityBegin);
-}
-
-int ringBufferAdvanceEnd(RingBuffer rb, size_t amount) {
-  size_t ctgSpace;
-  if (amount == 0) return 0;
-  if (rb->dataEnd == rb->capacityEnd) {
-    rb->dataEnd = rb->capacityBegin;
-  }
-  ctgSpace = ringBufferGetRemainingContiguousSpace(rb);
-  if (amount > ctgSpace) {
-    ctgSpace = amount - ctgSpace;
-    if (rb->dataBegin - rb->capacityBegin < ctgSpace) {
-      return 0;
-    }
-    rb->dataEnd = rb->capacityBegin + ctgSpace;
-  }
-  else {
-    rb->dataEnd += amount;
-  }
-  return 0;
-}
-
-int ringBufferAdvanceBegin(RingBuffer rb, size_t amount) {
-  size_t ctgSpace;
-  if (amount == 0) return 0;
-  if (rb->dataBegin == rb->capacityEnd) {
-    rb->dataBegin = rb->capacityBegin;
-  }
-  ctgSpace = ringBufferGetRemainingContiguousData(rb);
-  if (amount > ctgSpace) {
-    ctgSpace = amount - ctgSpace;
-    if (rb->dataEnd - rb->capacityBegin < ctgSpace) {
-      return 0;
-    }
-    rb->dataBegin = rb->capacityBegin + ctgSpace;
-  }
-  else {
-    rb->dataBegin += amount;
-  }
-  return 0;
-}
-
-size_t ringBufferGetNextWriteLocation(RingBuffer rb, void** retLocation) {
-  size_t sz;
-  if (rb->dataEnd == rb->capacityEnd) {
-    *retLocation = rb->capacityBegin;
-    sz = rb->dataBegin - rb->capacityBegin;
-    return (sz) ? sz - 1 : sz;
-  }
-  else if (rb->dataEnd < rb->dataBegin) {
-    *retLocation = rb->dataEnd;
-    sz = rb->dataBegin - rb->dataEnd;
-    return (sz) ? sz - 1 : sz;
-  }
-  *retLocation = rb->dataEnd;
-  return rb->capacityEnd - rb->dataEnd;
-}
-
-size_t ringBufferGetNextReadLocation(RingBuffer rb, void** retLocation) {
-  if (rb->dataBegin == rb->capacityEnd) {
-    *retLocation = rb->capacityBegin;
-    return rb->dataEnd - rb->capacityBegin;
-  }
-  else if (rb->dataEnd < rb->dataBegin) {
-    *retLocation = rb->dataBegin;
-    return rb->capacityEnd - rb->dataBegin;
-  }
-  *retLocation = rb->dataBegin;
-  return rb->dataEnd - rb->dataBegin;
-}
 
 /*******************************************************************************
  * Helper Functions
@@ -210,9 +120,27 @@ debugPrintStreamInfo(SkPcmStreamInfo* streamInfo) {
   NOTE("BufferBits   : %"PRIu32"\n", streamInfo->bufferBits);
 }
 
+static char const*
+timeValueUnitsString(TimeValue const* timeValue) {
+  switch (timeValue->units) {
+    case TU_MICROSECONDS:
+      return "us";
+    case TU_MILLISECONDS:
+      return "ms";
+    case TU_SECONDS:
+      return "s";
+    case TU_MINUTES:
+      return "m";
+    case TU_HOURS:
+      return "h";
+    case TU_DAYS:
+      return "d";
+  }
+}
+
 static int
 parseTimeValue(TimeValue* timeValue, char const* str) {
-  if (sscanf(str, "%u", &timeValue->amount) != 1) {
+  if (sscanf(str, "%zu", &timeValue->amount) != 1) {
     ERR("Failed to parse value for delay '%s'.\n", str);
   }
   while (isdigit(*str)) {
@@ -242,30 +170,69 @@ parseTimeValue(TimeValue* timeValue, char const* str) {
   return 0;
 }
 
-static size_t
-timeValueToSamples(TimeValue const* timeValue, uint32_t sampleRate) {
-  size_t samples = sampleRate;
+static double
+timeValueToFloat(TimeValue const* timeValue) {
   switch (timeValue->units) {
     case TU_MICROSECONDS:
-      samples *= timeValue->amount / 1000000;
-      break;
+      return timeValue->amount / 1000000.0;
     case TU_MILLISECONDS:
-      samples *= timeValue->amount / 1000;
-      break;
+      return timeValue->amount / 1000.0;
     case TU_SECONDS:
-      samples *= timeValue->amount;
-      break;
+      return timeValue->amount;
     case TU_MINUTES:
-      samples *= timeValue->amount * 60;
-      break;
+      return timeValue->amount * 60.0;
     case TU_HOURS:
-      samples *= timeValue->amount * 3600;
-      break;
+      return timeValue->amount * 3600.0;
     case TU_DAYS:
-      samples *= timeValue->amount * 86400;
+      return timeValue->amount * 86400.0;
+  }
+}
+
+static size_t
+timeValueToSamples(TimeValue const* timeValue, uint32_t sampleRate) {
+  return ((size_t)sampleRate * timeValueToFloat(timeValue));
+}
+
+static double
+timeValueCompare(TimeValue const* lhs, TimeValue const* rhs) {
+  return timeValueToFloat(lhs) - timeValueToFloat(rhs);
+}
+
+static void
+timeValueSimplify(TimeValue *timeValue) {
+  switch (timeValue->units) {
+    case TU_MICROSECONDS:
+      if (timeValue->amount % 1000 == 0) {
+        timeValue->units = TU_MILLISECONDS;
+        timeValue->amount /= 1000;
+      }
+      else break;
+    case TU_MILLISECONDS:
+      if (timeValue->amount % 1000 == 0) {
+        timeValue->units = TU_SECONDS;
+        timeValue->amount /= 1000;
+      }
+      else break;
+    case TU_SECONDS:
+      if (timeValue->amount % 60 == 0) {
+        timeValue->units = TU_MINUTES;
+        timeValue->amount /= 60;
+      }
+      else break;
+    case TU_MINUTES:
+      if (timeValue->amount % 60 == 0) {
+        timeValue->units = TU_HOURS;
+        timeValue->amount /= 60;
+      }
+      else break;
+    case TU_HOURS:
+      if (timeValue->amount % 24 == 0) {
+        timeValue->units = TU_DAYS;
+        timeValue->amount /= 60;
+      }
+    default:
       break;
   }
-  return samples;
 }
 
 /*******************************************************************************
@@ -292,6 +259,10 @@ calculateOutputDescriptor(DataDuplicator *dd) {
           dd->outRequest.pcm.channels = streamInfo->channels;
         if (streamInfo->periods > dd->outRequest.pcm.periods)
           dd->outRequest.pcm.periods = streamInfo->periods;
+        if (streamInfo->periodSamples > dd->outRequest.pcm.periodSize)
+          dd->outRequest.pcm.periodSize = streamInfo->periodSamples;
+        if (streamInfo->bufferSamples > dd->outRequest.pcm.bufferSize)
+          dd->outRequest.pcm.bufferSize = streamInfo->bufferSamples;
         break;
       case DT_WAVE:
         ERR("Unsupported!\n");
@@ -299,6 +270,9 @@ calculateOutputDescriptor(DataDuplicator *dd) {
         ERR("Unknown or unsupported output descriptor.\n");
     }
   }
+
+  // Note: Double the latency of the output stream to provide adequate preparation time.
+  dd->outRequest.pcm.periods *= 2;
 
   return 0;
 }
@@ -448,78 +422,168 @@ addDefintion(DataSet *set, char const* pathName, SkStreamType type, DataDirectio
   return 0;
 }
 
+static size_t
+transferData(SkRingBuffer ringBuffer, int64_t response, size_t sampleBytes, int isWriteLocation) {
+  if (response >= 0) {
+    if (isWriteLocation) {
+      skRingBufferAdvanceWriteLocation(ringBuffer, (size_t) response * sampleBytes);
+    }
+    else {
+      skRingBufferAdvanceReadLocation(ringBuffer, (size_t) response * sampleBytes);
+    }
+    return (size_t) response;
+  }
+  char const* type = (isWriteLocation) ? "IN" : "OUT";
+  switch (response) {
+    case -SK_ERROR_STREAM_XRUN:
+      WRN("%s [XRUN]: Buffer overflow detected.\n", type);
+      break;
+    case -SK_ERROR_STREAM_BUSY:
+      // Device is not ready with more information, try again later.
+      break;
+    case -SK_ERROR_STREAM_NOT_READY:
+      WRN("%s [REDY]: Stream is not yet ready to be used.\n", type);
+      break;
+    case -SK_ERROR_STREAM_INVALID:
+      ERR("%s [EROR]: Stream is in an invalid state and is no longer usable.\n", type);
+    case -SK_ERROR_STREAM_LOST:
+      ERR("%s [EROR]: Device has been lost and the stream is no longer available.\n", type);
+    default:
+      ERR("%s [EROR]: Unknown or unhandled error.\n", type);
+  }
+  return 0;
+}
+
+// TODO: This definitely shouldn't be in the application...
+typedef struct SkRingBuffer_T {
+  void* capacityBegin;
+  void* capacityEnd;
+  void* dataBegin;
+  void* dataEnd;
+} SkRingBuffer_T;
+
+// TODO: This is handy for debugging, needs to be it's own switch before it should be used.
+static void
+printRingBuffer(SkRingBuffer ringBuffer) {
+  return;
+  uint32_t display= 80;
+  uint32_t total  = ringBuffer->capacityEnd - ringBuffer->capacityBegin;
+  uint32_t pBegin = (uint32_t)(display * ((float)(ringBuffer->dataBegin - ringBuffer->capacityBegin) / total));
+  uint32_t pEnd   = (uint32_t)(display * ((float)(ringBuffer->dataEnd   - ringBuffer->capacityBegin) / total));
+  putc('\r', stdout);
+  putc('[', stdout);
+  for (uint32_t c = 0; c < display; ++c) {
+    if (c == pBegin && c == pEnd) {
+      fputs("×", stdout);
+    }
+    else if (c == pBegin) {
+      fputs("‹", stdout);
+    }
+    else if (c == pEnd) {
+      fputs("›", stdout);
+    }
+    else {
+      putc(' ', stdout);
+    }
+  }
+  putc(']', stdout);
+  fflush(stdout);
+}
+
 static int
 processData(DataDuplicator* dd) {
-  int64_t samplesIn;
-  int64_t samplesOut;
-  uint32_t samplesBuffered;
-  RingBuffer ringBuffer;
+  int64_t samples;
+  SkResult result;
+  SkRingBuffer ringBuffer;
   SkPcmStreamInfo* outInfo;
+  SkPcmStreamInfo* inInfo;
   SkStream inStream;
   SkStream outStream;
   uint32_t sampleBytes;
-  void* data;
-  size_t remainingSpace;
-  size_t remainingContiguousSamples;
+  void* pBuffer;
   size_t sampleDelay;
   size_t sampleDuration;
   size_t samplesTransferred;
-  uint32_t samplesLeft;
+  size_t sampleHwLatency;
 
   // Shortcuts to regularly-used variables
-  outInfo  = &dd->out.data->endpoint.asStream.streamInfo.pcm;
-  inStream = dd->in.data->endpoint.asStream.stream;
-  outStream= dd->out.data->endpoint.asStream.stream;
+  inInfo      = &dd->in.data->endpoint.asStream.streamInfo.pcm;
+  outInfo     = &dd->out.data->endpoint.asStream.streamInfo.pcm;
+  inStream    = dd->in.data->endpoint.asStream.stream;
+  outStream   = dd->out.data->endpoint.asStream.stream;
   sampleBytes = outInfo->sampleBits / 8;
-  sampleDelay = timeValueToSamples(&dd->delay, outInfo->sampleRate);
+
+  // Calculate the important sample values (delay and duration)
   sampleDuration = timeValueToSamples(&dd->duration, outInfo->sampleRate);
+  sampleDelay    = timeValueToSamples(&dd->delay, outInfo->sampleRate);
+  sampleHwLatency= timeValueToSamples(&dd->hardwareLatency, outInfo->sampleRate);
+  if(sampleDelay < sampleHwLatency) {
+    ERR("The amount of samples delayed must always be greater-than or equal-to the latency!\n");
+  }
+  sampleDelay -= sampleHwLatency;
   samplesTransferred = 0;
 
   // Check that sample durations and delays are valid.
-  if (sampleDelay == 0) sampleDelay = 1;
+  // Note: The check for setting sampleDuration to 1 when sampleDuration == 0 handles
+  //       an edge-case where a low duration can be given, causing the duration to floor
+  //       to 0. If a duration is requested, it must be upheld as best as possible.
   if (dd->duration.amount != 0) {
-    if (sampleDuration == 0) sampleDuration = 1;
-    if (sampleDelay > sampleDuration) sampleDelay = sampleDuration;
+    if (sampleDuration == 0) {
+      sampleDuration = 1;
+    }
+    if (sampleDelay > sampleDuration) {
+      sampleDelay = sampleDuration;
+    }
   }
 
-  // Calculate the number of samples required for the full delay
-  ringBufferInit(ringBuffer, 2 * sampleDelay * sampleBytes);
-  memset(ringBuffer->dataBegin, 0, 2 * sampleDelay * sampleBytes);
-  ringBufferAdvanceEnd(ringBuffer, sampleDelay * sampleBytes);
-  samplesBuffered = sampleDelay;
-  putc('\n', stdout);
-
-  // TODO: Make this whole thing parallel or non-blocking (depending on how we want to scale).
-  // Note: The reason this doesn't work is because input is always dependent on output.
-  //       If one buffer falls behind, they both fall behind.
-  //       If one buffer XRUNs they both XRUN, and what's worse is it's unrecoverable.
-  uint32_t samplesToCapture = SK_MIN(sampleDelay, outInfo->periodSamples);
-  while (!sampleDuration || (sampleDuration > samplesTransferred)) {
-    // Read from the input streams...
-    remainingSpace = ringBufferGetNextWriteLocation(ringBuffer, &data);
-    remainingContiguousSamples = remainingSpace / sampleBytes;
-    samplesLeft = (sampleDuration) ? (sampleDuration - samplesTransferred - samplesBuffered) : UINT32_MAX;
-    samplesIn = skStreamReadInterleaved(inStream, data, SK_MIN(samplesLeft, SK_MIN(samplesToCapture, (uint32_t)remainingContiguousSamples)));
-    if (samplesIn < 0) {
-      fprintf(stderr, "The stream encountered an unrecoverable error: %d\n", (int)-samplesIn);
-      return 1;
-    }
-    ringBufferAdvanceEnd(ringBuffer, (size_t)samplesIn * sampleBytes);
-    samplesBuffered += samplesIn;
-
-    // Write to the output streams...
-    remainingSpace = ringBufferGetNextReadLocation(ringBuffer, &data);
-    remainingContiguousSamples = remainingSpace / sampleBytes;
-    samplesOut = skStreamWriteInterleaved(outStream, data, SK_MIN(samplesBuffered, SK_MIN(samplesToCapture, (uint32_t)remainingContiguousSamples)));
-    if (samplesOut < 0) {
-      fprintf(stderr, "The stream encountered an unrecoverable error: %d\n", (int)-samplesOut);
-      return 1;
-    }
-    samplesBuffered -= samplesOut;
-    samplesTransferred += samplesOut;
-    ringBufferAdvanceBegin(ringBuffer, (size_t)samplesOut * sampleBytes);
+  // Construct the minimal ring buffer
+  // Note: Minimally we should hold the same amount of data that the hardware does.
+  //       If there is a delay set that isn't the same as the calculated audio latency,
+  //       we also have to hold those samples. (Meaning there is a RAM-dependant limit to delay)
+  size_t requiredPreloadSamples = sampleDelay;
+  size_t ringBufferSamples = sampleDelay + inInfo->bufferSamples;
+  size_t ringBufferSize = ringBufferSamples * sampleBytes;
+  result = skRingBufferCreate(&ringBuffer, ringBufferSize, NULL);
+  if (result != SK_SUCCESS) {
+    ERR("Failed to create SkRingBuffer of size %zu: %d\n", ringBufferSize, result);
   }
-  ringBufferFree(ringBuffer);
+
+  // Fill the ring buffer with the number of samples to fully-represent the delay
+  // TODO: Is memset(0) okay? Will some configurations not be "silent" at 0?
+  size_t samplesPrepared = sampleDelay;
+  skRingBufferNextWriteLocation(ringBuffer, &pBuffer);
+  memset(pBuffer, 0, sampleDelay * sampleBytes);
+  skRingBufferAdvanceWriteLocation(ringBuffer, sampleDelay * sampleBytes);
+  if (dd->f_debug) {
+    printRingBuffer(ringBuffer);
+  }
+
+  // Preload the delay data, as well as one period of sampled data
+  size_t sizeBytes;
+  do {
+    // Capture samples
+    do {
+      sizeBytes = skRingBufferNextWriteLocation(ringBuffer, &pBuffer);
+      do {
+        samples = skStreamReadInterleaved(inStream, pBuffer, (uint32_t) (sizeBytes / sampleBytes));
+        samplesPrepared += transferData(ringBuffer, samples, sampleBytes, 1);
+        if (-samples == SK_ERROR_STREAM_XRUN) {
+          skRingBufferClear(ringBuffer);
+          samplesPrepared = 0;
+        }
+      } while (samples < 0);
+    } while (samplesPrepared < requiredPreloadSamples);
+
+    // Playback samples
+    sizeBytes = skRingBufferNextReadLocation(ringBuffer, &pBuffer);
+    samples = skStreamWriteInterleaved(outStream, pBuffer, (uint32_t) (sizeBytes / sampleBytes));
+    samplesTransferred += transferData(ringBuffer, samples, sampleBytes, 0);
+    if (-samples == SK_ERROR_STREAM_XRUN) {
+      samplesPrepared = 0;
+    }
+
+  } while (samplesTransferred < sampleDuration || !sampleDuration);
+  skRingBufferDestroy(ringBuffer, NULL);
 
   return 0;
 }
@@ -532,7 +596,7 @@ displayUsage() {
       "\n"
       "Options:\n"
       "  -h, --help        Prints this help documentation.\n"
-      "  -d, --debug       Print skdd debug information while running.\n"
+      "  -d, --debug       Print partial skdd debug information while running.\n"
       "\n"
       "Inputs:\n"
       "  if=FILE           Read from input file for data manipulation.\n"
@@ -544,12 +608,13 @@ displayUsage() {
       "  out=FILE/STREAM   Output into an encoded file or stream (same as of).\n"
       "\n"
       "PCM Operations:\n"
-      "  delay=TIME        The target delay between input and output (default=1ms).\n"
+      "  delay=TIME        The target delay between input and output (default=configuration-dependant).\n"
       "  duration=TIME     The target duration of the whole stream operation (default=infinite).\n"
-      "                    Supported times: #us, #ms, #s, #m, #h, #d (Where # is any positive integer).\n"
-      "  bitrate=N         The target input/output bitrate (default=MAX).\n"
-      "  periods=N         The number of periods to support per stream (default=MAX).\n"
-      "  channels=N        The number of channels in to support (default=MAX).\n"
+      "                    Supported: #us, #ms, #s, #m, #h, #d (Where # is any positive integer).\n"
+      "  samplerate=N      The target input/output samplerate (default=48000).\n"
+      "  periods=N         The number of periods to support per stream (default=4).\n"
+      "  period-size=N     The number of samples in a period (default=144).\n"
+      "  channels=N        The number of channels in to support (default=2).\n"
       "  format=FLAG       The underlying data type for the stream (default=LAST).\n"
       "                    Supported: char/int8, short/int16, int/int32, uint8, uint16, unsigned/uint32, float/float32, float64.\n"
   );
@@ -568,26 +633,26 @@ main(int argc, char const *argv[]) {
   memset(&dd, 0, sizeof(DataDuplicator));
 
   // Set defaults for stream request
+  // Note: Capture must poll and wait due to a bug in ALSA which produces static without waiting
+  //       Playback is set to only poll, it does not appear to have the same bug.
   dd.inRequest.streamType       = SK_STREAM_TYPE_PCM_CAPTURE;
-  dd.inRequest.pcm.accessMode   = SK_ACCESS_MODE_BLOCK;
+  dd.inRequest.pcm.accessMode   = SK_ACCESS_MODE_NONBLOCK;
+  dd.inRequest.pcm.streamFlags  = SK_STREAM_FLAGS_POLL_AVAILABLE | SK_STREAM_FLAGS_WAIT_AVAILABLE;
   dd.inRequest.pcm.accessType   = SK_ACCESS_TYPE_INTERLEAVED;
   dd.inRequest.pcm.formatType   = SK_FORMAT_LAST_STATIC;
-  dd.inRequest.pcm.sampleRate   = UINT32_MAX;
-  dd.inRequest.pcm.channels     = UINT32_MAX;
-  dd.inRequest.pcm.periods      = UINT32_MAX;
-  dd.inRequest.pcm.bufferSize   = UINT32_MAX;
+  dd.inRequest.pcm.sampleRate   = 48000;
+  dd.inRequest.pcm.channels     = 2;
+  dd.inRequest.pcm.periods      = 4;
+  dd.inRequest.pcm.periodSize   = 144;
   dd.outRequest.streamType      = SK_STREAM_TYPE_PCM_PLAYBACK;
-  dd.outRequest.pcm.accessMode  = SK_ACCESS_MODE_BLOCK;
+  dd.outRequest.pcm.accessMode  = SK_ACCESS_MODE_NONBLOCK;
+  dd.outRequest.pcm.streamFlags = SK_STREAM_FLAGS_POLL_AVAILABLE;
   dd.outRequest.pcm.accessType  = SK_ACCESS_TYPE_INTERLEAVED;
   dd.outRequest.pcm.formatType  = SK_FORMAT_ANY;
   dd.outRequest.pcm.sampleRate  = 0;
   dd.outRequest.pcm.channels    = 0;
   dd.outRequest.pcm.periods     = 0;
-  dd.outRequest.pcm.bufferSize  = 0;
-
-  // Set defaults for data duplication
-  dd.delay.amount = 1;
-  dd.delay.units  = TU_MILLISECONDS;
+  dd.outRequest.pcm.periodSize  = 0;
 
   //////////////////////////////////////////////////////////////////////////////
   // Handle command-line options.
@@ -619,7 +684,9 @@ main(int argc, char const *argv[]) {
         ERR("Aborting due to previous errors.\n");
       }
     }
-    else if (skCheckParamBeginsUTL(param, "--samplerate=", "samplerate=")) {
+    else if (skCheckParamBeginsUTL(param, "--sample-rate=", "sample-rate="
+                                        , "--sampleRate=", "sampleRate="
+                                        , "--samplerate=", "samplerate=")) {
       if (sscanf(value, "%u", &dd.inRequest.pcm.sampleRate) != 1) {
         ERR("Failed to parse value for samplerate '%s'.\n", value);
       }
@@ -634,34 +701,44 @@ main(int argc, char const *argv[]) {
         ERR("Failed to parse value for period '%s'.\n", value);
       }
     }
+    else if (skCheckParamBeginsUTL(param, "--period-size=", "period-size="
+                                        , "--periodSize=", "periodSize="
+                                        , "--periodsize=", "periodsize=")) {
+      if (sscanf(value, "%u", &dd.inRequest.pcm.periodSize) != 1) {
+        ERR("Failed to parse value for period-size '%s'.\n", value);
+      }
+    }
     else if (skCheckParamBeginsUTL(param, "--delay=", "delay=")) {
       if (parseTimeValue(&dd.delay, value) != 0) {
         ERR("Aborting due to previous errors.\n");
       }
+      if (dd.delay.amount == 0) {
+        ERR("A delay of 0us is physically impossible - leave delay unset to use smallest delay for your configuration.");
+      }
     }
     else if (skCheckParamBeginsUTL(param, "--format=", "format=")) {
-      if (skCheckParamUTL(value, "float64")) {
+      if (skCheckParamUTL(value, "float64", "f64")) {
         dd.inRequest.pcm.formatType = SK_FORMAT_FLOAT64;
       }
-      else if (skCheckParamUTL(value, "float", "float32")) {
+      else if (skCheckParamUTL(value, "float", "float32", "f32")) {
         dd.inRequest.pcm.formatType = SK_FORMAT_FLOAT;
       }
-      else if (skCheckParamUTL(value, "char", "int8")) {
+      else if (skCheckParamUTL(value, "char", "int8", "s8")) {
         dd.inRequest.pcm.formatType = SK_FORMAT_S8;
       }
-      else if (skCheckParamUTL(value, "short", "int16")) {
+      else if (skCheckParamUTL(value, "short", "int16", "s16")) {
         dd.inRequest.pcm.formatType = SK_FORMAT_S16;
       }
-      else if (skCheckParamUTL(value, "int", "int32")) {
+      else if (skCheckParamUTL(value, "int", "int32", "s32")) {
         dd.inRequest.pcm.formatType = SK_FORMAT_S32;
       }
-      else if (skCheckParamUTL(value, "uint8")) {
+      else if (skCheckParamUTL(value, "uint8", "u8")) {
         dd.inRequest.pcm.formatType = SK_FORMAT_U8;
       }
-      else if (skCheckParamUTL(value, "uint16")) {
+      else if (skCheckParamUTL(value, "uint16", "u16")) {
         dd.inRequest.pcm.formatType = SK_FORMAT_U16;
       }
-      else if (skCheckParamUTL(value, "unsigned", "uint32")) {
+      else if (skCheckParamUTL(value, "unsigned", "uint32", "u32")) {
         dd.inRequest.pcm.formatType = SK_FORMAT_U32;
       }
       else {
@@ -694,6 +771,7 @@ main(int argc, char const *argv[]) {
   if (dd.in.count > 1) {
     ERR("Currently, only one input stream is supported.\n");
   }
+  // TODO: Check that value input for delay/duration can fit as sample counts in size_t
 
   //////////////////////////////////////////////////////////////////////////////
   // Create OpenSK instance
@@ -734,6 +812,65 @@ main(int argc, char const *argv[]) {
     if (iResult) {
       ERR("Unrecoverable error detected, aborting.\n");
     }
+  }
+
+  // Calculate the hardware latencies (based on the results from all input/output data)
+  dd.maxInputLatency.units = TU_MICROSECONDS;
+  for (idx = 0; idx < dd.in.count; ++idx) {
+    if (dd.in.data[idx].endpoint.asStream.streamInfo.pcm.latencyTime > dd.maxInputLatency.amount) {
+      dd.maxInputLatency.amount = dd.in.data[idx].endpoint.asStream.streamInfo.pcm.latencyTime;
+    }
+  }
+  dd.maxOutputLatency.units = TU_MICROSECONDS;
+  for (idx = 0; idx < dd.out.count; ++idx) {
+    if (dd.out.data[idx].endpoint.asStream.streamInfo.pcm.latencyTime > dd.maxOutputLatency.amount) {
+      dd.maxOutputLatency.amount = dd.out.data[idx].endpoint.asStream.streamInfo.pcm.latencyTime;
+    }
+  }
+  dd.minHardwareLatency.amount = SK_MIN(dd.maxInputLatency.amount, dd.maxOutputLatency.amount);
+  dd.minHardwareLatency.units = TU_MICROSECONDS;
+  dd.maxHardwareLatency.amount = SK_MAX(dd.maxInputLatency.amount, dd.maxOutputLatency.amount);
+  dd.maxHardwareLatency.units = TU_MICROSECONDS;
+  dd.hardwareLatency.amount = dd.maxInputLatency.amount + dd.maxOutputLatency.amount;
+  dd.hardwareLatency.units = TU_MICROSECONDS;
+
+  // Calculate the recommended software latency (based on the minimum hardware latency)
+  // TODO: Add software latency as a configurable setting, convert to microseconds
+  if (dd.softwareLatency.amount == 0 && dd.softwareLatency.units == TU_MICROSECONDS) {
+    dd.softwareLatency.amount = dd.minHardwareLatency.amount;
+  }
+
+  // Calculate the entire roundtrip latency (input-software-output)
+  dd.roundTripLatency.amount = dd.hardwareLatency.amount + dd.softwareLatency.amount;
+  dd.roundTripLatency.units  = TU_MICROSECONDS;
+
+  // Clamp the delay to the minimum possible delay
+  // Note: We will only print a warning if the user attempted to set a latency.
+  if (timeValueCompare(&dd.delay, &dd.roundTripLatency) < 0) {
+    if (dd.delay.amount != 0 || dd.delay.units != TU_MICROSECONDS) {
+      WRN("Requested delay of %zu%s is not supported for this configuration, setting to minimum available %zu%s\n",
+        dd.delay.amount, timeValueUnitsString(&dd.delay), dd.roundTripLatency.amount, timeValueUnitsString(&dd.roundTripLatency));
+    }
+    dd.delay.amount = dd.roundTripLatency.amount + SK_MIN(dd.maxInputLatency.amount, dd.maxOutputLatency.amount);
+    dd.delay.units = TU_MICROSECONDS;
+  }
+
+  // Simplify all latency values
+  timeValueSimplify(&dd.maxInputLatency);
+  timeValueSimplify(&dd.maxOutputLatency);
+  timeValueSimplify(&dd.minHardwareLatency);
+  timeValueSimplify(&dd.maxHardwareLatency);
+  timeValueSimplify(&dd.hardwareLatency);
+  timeValueSimplify(&dd.softwareLatency);
+  timeValueSimplify(&dd.roundTripLatency);
+
+  // Print the delay if it's desired (debug mode only)
+  if (dd.f_debug) {
+    NOTE("Latencies Calculated:\n");
+    NOTE("Hardware input latency  : %zu%s\n",   dd.maxInputLatency.amount,  timeValueUnitsString(&dd.maxInputLatency));
+    NOTE("Software buffer latency : %zu%s\n",   dd.softwareLatency.amount,  timeValueUnitsString(&dd.softwareLatency));
+    NOTE("Hardware output latency : %zu%s\n",   dd.maxOutputLatency.amount, timeValueUnitsString(&dd.maxOutputLatency));
+    NOTE("Total round-trip latency: %zu%s\n\n", dd.roundTripLatency.amount, timeValueUnitsString(&dd.roundTripLatency));
   }
 
   //////////////////////////////////////////////////////////////////////////////

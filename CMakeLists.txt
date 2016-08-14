@@ -41,7 +41,9 @@ add_library(sk
   OpenSK/opensk.h
   OpenSK/opensk.c
   OpenSK/opensk_platform.h
+  OpenSK/dev/assert.h
   OpenSK/dev/hosts.h
+  OpenSK/dev/macros.h
 )
 
 if(ALSA_FOUND)
@@ -57,6 +59,8 @@ endif()
 add_library(skx
   OpenSK/ext/utils.h
   OpenSK/ext/utils.c
+  OpenSK/ext/ringbuffer.h
+  OpenSK/ext/ringbuffer.c
 )
 add_subdirectory(utils)
 
@@ -67,7 +71,11 @@ install(
   FILES
     OpenSK/opensk.h
     OpenSK/opensk_platform.h
+    OpenSK/dev/assert.h
+    OpenSK/dev/hosts.h
+    OpenSK/dev/macros.h
     OpenSK/ext/utils.h
+    OpenSK/ext/ringbuffer.h
   DESTINATION include
 )
 install(
