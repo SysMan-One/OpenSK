@@ -34,7 +34,7 @@ typedef SkResult (SKAPI_PTR *PFN_skProcedure)(SkProcedure procedure, void** para
 #define SK_PARAMS_HOSTAPI_SCAN (SkHostApi)params[0]
 #define SK_PARAMS_HOSTAPI_FREE (SkHostApi)params[0]
 #define SK_PARAMS_COMPONENT_LIMITS (SkComponent)params[0], *(SkStreamType*)params[1], (SkComponentLimits*)params[2]
-#define SK_PARAMS_STREAM_REQUEST (SkComponent)params[0], (SkStreamRequest*)params[1], (SkStream*)params[2]
+#define SK_PARAMS_STREAM_REQUEST (SkComponent)params[0], (SkStreamInfo*)params[1], (SkStream*)params[2]
 #define SK_PARAMS_STREAM_GET_HANDLE (SkStream)params[0], (void**)&params[1]
 
 // Critical Functions

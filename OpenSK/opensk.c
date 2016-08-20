@@ -783,7 +783,7 @@ SKAPI_ATTR SkResult SKAPI_CALL skGetComponentLimits(
 
 SKAPI_ATTR SkResult SKAPI_CALL skRequestStream(
   SkComponent                       component,
-  SkStreamRequest*                  pStreamRequest,
+  SkStreamInfo*                     pStreamRequest,
   SkStream*                         pStream
 ) {
   void* params[] = { component, pStreamRequest, pStream };
@@ -849,6 +849,195 @@ SKAPI_ATTR void SKAPI_CALL skDestroyStream(
   void* params[] = { stream, &drain };
   stream->proc(SK_PROC_STREAM_DESTROY, params);
 }
+////////////////////////////////////////////////////////////////////////////////
+// Timer Functions
+////////////////////////////////////////////////////////////////////////////////
+
+SKAPI_ATTR SkTimeQuantum SKAPI_CALL skTimeQuantumConvert(
+  SkTimeQuantum                     timeQuantum,
+  SkTimeUnits                       fromTimeUnits,
+  SkTimeUnits                       toTimeUnits
+) {
+  int magnitudeDifference = fromTimeUnits - toTimeUnits;
+  switch (magnitudeDifference) {
+#if SK_TIME_QUANTUM_BITS >= 64
+    case -6:
+      return timeQuantum / 1000000000000000000u;
+    case -5:
+      return timeQuantum / 1000000000000000u;
+    case -4:
+      return timeQuantum / 1000000000000u;
+    case -3:
+      return timeQuantum / 1000000000u;
+#endif
+    case -2:
+      return timeQuantum / 1000000u;
+    case -1:
+      return timeQuantum / 1000u;
+    case 0:
+      return (timeQuantum % 1000000000000000000u) * 1u;
+    case 1:
+      return (timeQuantum % 1000000000000000u) * 1000u;
+    case 2:
+      return (timeQuantum % 1000000000000u) * 1000000u;
+#if SK_TIME_QUANTUM_BITS >= 64
+    case 3:
+      return (timeQuantum % 1000000000u) * 1000000000u;
+    case 4:
+      return (timeQuantum % 1000000u) * 1000000000000u;
+    case 5:
+      return (timeQuantum % 1000u) * 1000000000000000u;
+    case 6:
+      return (timeQuantum % 1u) * 1000000000000000000u;
+#endif
+    default:
+      return 0;
+  }
+}
+
+SKAPI_ATTR void SKAPI_CALL skTimePeriodClear(
+  SkTimePeriod                      timePeriod
+) {
+  timePeriod[SK_TIME_PERIOD_HI] = timePeriod[SK_TIME_PERIOD_LO] = 0;
+}
+
+SKAPI_ATTR void SKAPI_CALL skTimePeriodSet(
+  SkTimePeriod                      result,
+  SkTimePeriod                      original
+) {
+  result[SK_TIME_PERIOD_LO] = original[SK_TIME_PERIOD_LO];
+  result[SK_TIME_PERIOD_HI] = original[SK_TIME_PERIOD_HI];
+}
+
+SKAPI_ATTR void SKAPI_CALL skTimePeriodSetQuantum(
+  SkTimePeriod                      timePeriod,
+  SkTimeQuantum                     timeQuantum,
+  SkTimeUnits                       timeUnits
+) {
+  timePeriod[SK_TIME_PERIOD_LO] = skTimeQuantumConvert(timeQuantum, timeUnits, SK_TIME_UNITS_MIN);
+  timePeriod[SK_TIME_PERIOD_HI] = skTimeQuantumConvert(timeQuantum, timeUnits, SK_TIME_UNITS_SECONDS);
+}
+
+SKAPI_ATTR void SKAPI_CALL skTimePeriodAdd(
+  SkTimePeriod                      resultTimePeriod,
+  SkTimePeriod                      leftTimePeriod,
+  SkTimePeriod                      rightTimePeriod
+) {
+  resultTimePeriod[SK_TIME_PERIOD_LO] = leftTimePeriod[SK_TIME_PERIOD_LO] + rightTimePeriod[SK_TIME_PERIOD_LO];
+  resultTimePeriod[SK_TIME_PERIOD_HI] = leftTimePeriod[SK_TIME_PERIOD_HI] + rightTimePeriod[SK_TIME_PERIOD_HI] + (resultTimePeriod[SK_TIME_PERIOD_LO] / SK_TIME_QUANTUM_MAX);
+  resultTimePeriod[SK_TIME_PERIOD_LO] %= SK_TIME_QUANTUM_MAX;
+}
+
+
+SKAPI_ATTR void SKAPI_CALL skTimePeriodScaleAdd(
+  SkTimePeriod                      resultTimePeriod,
+  SkTimeQuantum                     leftScalar,
+  SkTimePeriod                      leftTimePeriod,
+  SkTimePeriod                      rightTimePeriod
+) {
+  resultTimePeriod[SK_TIME_PERIOD_LO] = leftScalar * leftTimePeriod[SK_TIME_PERIOD_LO] + rightTimePeriod[SK_TIME_PERIOD_LO];
+  resultTimePeriod[SK_TIME_PERIOD_HI] = leftScalar * leftTimePeriod[SK_TIME_PERIOD_HI] + rightTimePeriod[SK_TIME_PERIOD_HI] + (resultTimePeriod[SK_TIME_PERIOD_LO] / SK_TIME_QUANTUM_MOD);
+  resultTimePeriod[SK_TIME_PERIOD_LO] %= SK_TIME_QUANTUM_MOD;
+}
+
+SKAPI_ATTR void SKAPI_CALL skTimePeriodSubtract(
+  SkTimePeriod                      resultTimePeriod,
+  SkTimePeriod                      leftTimePeriod,
+  SkTimePeriod                      rightTimePeriod
+) {
+  resultTimePeriod[SK_TIME_PERIOD_LO] = leftTimePeriod[SK_TIME_PERIOD_LO] - rightTimePeriod[SK_TIME_PERIOD_LO] + SK_TIME_QUANTUM_MOD;
+  resultTimePeriod[SK_TIME_PERIOD_HI] = leftTimePeriod[SK_TIME_PERIOD_HI] - rightTimePeriod[SK_TIME_PERIOD_HI] - 1 + (resultTimePeriod[SK_TIME_PERIOD_LO] / SK_TIME_QUANTUM_MOD);
+  resultTimePeriod[SK_TIME_PERIOD_LO] %= SK_TIME_QUANTUM_MOD;
+}
+
+SKAPI_ATTR SkBool32 SKAPI_CALL skTimePeriodLess(
+  SkTimePeriod                      leftTimePeriod,
+  SkTimePeriod                      rightTimePeriod
+) {
+  if (leftTimePeriod[SK_TIME_PERIOD_HI] == rightTimePeriod[SK_TIME_PERIOD_HI]) {
+    return (leftTimePeriod[SK_TIME_PERIOD_LO] < rightTimePeriod[SK_TIME_PERIOD_LO]);
+  }
+  return (leftTimePeriod[SK_TIME_PERIOD_HI] < rightTimePeriod[SK_TIME_PERIOD_HI]);
+}
+
+SKAPI_ATTR SkBool32 SKAPI_CALL skTimePeriodLessEqual(
+  SkTimePeriod                      leftTimePeriod,
+  SkTimePeriod                      rightTimePeriod
+) {
+  if (leftTimePeriod[SK_TIME_PERIOD_HI] == rightTimePeriod[SK_TIME_PERIOD_HI]) {
+    return (leftTimePeriod[SK_TIME_PERIOD_LO] <= rightTimePeriod[SK_TIME_PERIOD_LO]);
+  }
+  return (leftTimePeriod[SK_TIME_PERIOD_HI] < rightTimePeriod[SK_TIME_PERIOD_HI]);
+}
+
+SKAPI_ATTR SkBool32 SKAPI_CALL skTimePeriodIsZero(
+  SkTimePeriod                      timePeriod
+) {
+  return (timePeriod[SK_TIME_PERIOD_LO] == 0 && timePeriod[SK_TIME_PERIOD_HI] == 0);
+}
+
+SKAPI_ATTR float SKAPI_CALL skTimePeriodToFloat(
+  SkTimePeriod                      timePeriod,
+  SkTimeUnits                       timeUnits
+) {
+  float amountInSeconds = timePeriod[SK_TIME_PERIOD_HI] + ((float)timePeriod[SK_TIME_PERIOD_LO] / SK_TIME_QUANTUM_MAX);
+  switch ((int)(SK_TIME_UNITS_SECONDS - timeUnits)) {
+    case -12:
+      return amountInSeconds / 1e36f;
+    case -11:
+      return amountInSeconds / 1e33f;
+    case -10:
+      return amountInSeconds / 1e30f;
+    case -9:
+      return amountInSeconds / 1e27f;
+    case -8:
+      return amountInSeconds / 1e24f;
+    case -7:
+      return amountInSeconds / 1e21f;
+    case -6:
+      return amountInSeconds / 1e18f;
+    case -5:
+      return amountInSeconds / 1e15f;
+    case -4:
+      return amountInSeconds / 1e12f;
+    case -3:
+      return amountInSeconds / 1e9f;
+    case -2:
+      return amountInSeconds / 1e6f;
+    case -1:
+      return amountInSeconds / 1e3f;
+    case 0:
+      return amountInSeconds;
+    case 1:
+      return amountInSeconds * 1e3f;
+    case 2:
+      return amountInSeconds * 1e6f;
+    case 3:
+      return amountInSeconds * 1e9f;
+    case 4:
+      return amountInSeconds * 1e12f;
+    case 5:
+      return amountInSeconds * 1e15f;
+    case 6:
+      return amountInSeconds * 1e18f;
+    case 7:
+      return amountInSeconds * 1e21f;
+    case 8:
+      return amountInSeconds * 1e24f;
+    case 9:
+      return amountInSeconds * 1e27f;
+    default:
+      return 0;
+  }
+}
+
+SKAPI_ATTR SkTimeQuantum SKAPI_CALL skTimePeriodToQuantum(
+  SkTimePeriod                      timePeriod,
+  SkTimeUnits                       timeUnits
+) {
+  return skTimeQuantumConvert(timePeriod[SK_TIME_PERIOD_LO], SK_TIME_UNITS_MIN, timeUnits) +
+         skTimeQuantumConvert(timePeriod[SK_TIME_PERIOD_HI], SK_TIME_UNITS_SECONDS, timeUnits);
+}
 
 ////////////////////////////////////////////////////////////////////////////////
 // Stringize Functions
@@ -877,6 +1066,17 @@ SKAPI_ATTR char const* SKAPI_CALL skGetStreamTypeString(
     PRINT_CASE(SK_STREAM_TYPE_PCM_CAPTURE);
   }
   SKERROR("Invalid or unsupported value (%d)", (int)streamType);
+}
+
+SKAPI_ATTR char const* SKAPI_CALL skGetStreamFlagString(
+  SkStreamFlags                     streamFlag
+) {
+  switch (streamFlag) {
+    PRINT_CASE(SK_STREAM_FLAGS_NONE);
+    PRINT_CASE(SK_STREAM_FLAGS_POLL_AVAILABLE);
+    PRINT_CASE(SK_STREAM_FLAGS_WAIT_AVAILABLE);
+  }
+  SKERROR("Invalid or unsupported value (%d)", (int)streamFlag);
 }
 
 SKAPI_ATTR char const* SKAPI_CALL skGetAccessModeString(
@@ -969,3 +1169,96 @@ SKAPI_ATTR SkFormat SKAPI_CALL skGetFormatStatic(
       return format;
   }
 }
+
+SKAPI_ATTR char const* SKAPI_CALL skGetTimeUnitsString(
+  SkTimeUnits                       timeUnits
+) {
+  switch (timeUnits) {
+    PRINT_CASE(SK_TIME_UNITS_UNKNOWN);
+    PRINT_CASE(SK_TIME_UNITS_PLANCKTIME);
+    PRINT_CASE(SK_TIME_UNITS_PLANCKTIME_E3);
+    PRINT_CASE(SK_TIME_UNITS_PLANCKTIME_E6);
+    PRINT_CASE(SK_TIME_UNITS_PLANCKTIME_E9);
+    PRINT_CASE(SK_TIME_UNITS_PLANCKTIME_E12);
+    PRINT_CASE(SK_TIME_UNITS_PLANCKTIME_E15);
+    PRINT_CASE(SK_TIME_UNITS_PLANCKTIME_E18);
+    PRINT_CASE(SK_TIME_UNITS_YOCTOSECONDS);
+    PRINT_CASE(SK_TIME_UNITS_ZEPTOSECONDS);
+    PRINT_CASE(SK_TIME_UNITS_ATTOSECONDS);
+    PRINT_CASE(SK_TIME_UNITS_FEMTOSECONDS);
+    PRINT_CASE(SK_TIME_UNITS_PICOSECONDS);
+    PRINT_CASE(SK_TIME_UNITS_NANOSECONDS);
+    PRINT_CASE(SK_TIME_UNITS_MICROSECONDS);
+    PRINT_CASE(SK_TIME_UNITS_MILLISECONDS);
+    PRINT_CASE(SK_TIME_UNITS_SECONDS);
+    PRINT_CASE(SK_TIME_UNITS_KILOSECONDS);
+    PRINT_CASE(SK_TIME_UNITS_MEGASECONDS);
+    PRINT_CASE(SK_TIME_UNITS_GIGASECONDS);
+    PRINT_CASE(SK_TIME_UNITS_TERASECONDS);
+    PRINT_CASE(SK_TIME_UNITS_PETASECONDS);
+    PRINT_CASE(SK_TIME_UNITS_EXASECONDS);
+    PRINT_CASE(SK_TIME_UNITS_ZETTASECONDS);
+    PRINT_CASE(SK_TIME_UNITS_YOTTASECONDS);
+  }
+  SKERROR("Invalid or unsupported value (%d)", (int)timeUnits);
+}
+
+SKAPI_ATTR char const* SKAPI_CALL skGetTimeUnitsSymbolString(
+  SkTimeUnits                       timeUnits
+) {
+  switch (timeUnits) {
+    case SK_TIME_UNITS_UNKNOWN:
+      return NULL;
+    case SK_TIME_UNITS_PLANCKTIME:
+      return "tP";
+    case SK_TIME_UNITS_PLANCKTIME_E3:
+      return "tP^3";
+    case SK_TIME_UNITS_PLANCKTIME_E6:
+      return "tP^6";
+    case SK_TIME_UNITS_PLANCKTIME_E9:
+      return "tP^9";
+    case SK_TIME_UNITS_PLANCKTIME_E12:
+      return "tP^12";
+    case SK_TIME_UNITS_PLANCKTIME_E15:
+      return "tP^15";
+    case SK_TIME_UNITS_PLANCKTIME_E18:
+      return "tP^18";
+    case SK_TIME_UNITS_YOCTOSECONDS:
+      return "ys";
+    case SK_TIME_UNITS_ZEPTOSECONDS:
+      return "zs";
+    case SK_TIME_UNITS_ATTOSECONDS:
+      return "as";
+    case SK_TIME_UNITS_FEMTOSECONDS:
+      return "fs";
+    case SK_TIME_UNITS_PICOSECONDS:
+      return "ps";
+    case SK_TIME_UNITS_NANOSECONDS:
+      return "ns";
+    case SK_TIME_UNITS_MICROSECONDS:
+      return "µs";
+    case SK_TIME_UNITS_MILLISECONDS:
+      return "ms";
+    case SK_TIME_UNITS_SECONDS:
+      return "s";
+    case SK_TIME_UNITS_KILOSECONDS:
+      return "ks";
+    case SK_TIME_UNITS_MEGASECONDS:
+      return "Ms";
+    case SK_TIME_UNITS_GIGASECONDS:
+      return "Gs";
+    case SK_TIME_UNITS_TERASECONDS:
+      return "Ts";
+    case SK_TIME_UNITS_PETASECONDS:
+      return "Ps";
+    case SK_TIME_UNITS_EXASECONDS:
+      return "Es";
+    case SK_TIME_UNITS_ZETTASECONDS:
+      return "Zs";
+    case SK_TIME_UNITS_YOTTASECONDS:
+      return "Ys";
+  }
+  SKERROR("Invalid or unsupported value (%d)", (int)timeUnits);
+}
+
+#undef PRINT_CASE

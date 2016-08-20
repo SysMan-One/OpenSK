@@ -58,4 +58,20 @@ SKAPI_ATTR void SKAPI_CALL skRingBufferClear(
   SkRingBuffer                  ringBuffer
 );
 
+SKAPI_ATTR void* SKAPI_CALL skGetRingBufferCapacityBegin(
+  SkRingBuffer                  ringBuffer
+);
+
+SKAPI_ATTR void* SKAPI_CALL skGetRingBufferCapacityEnd(
+  SkRingBuffer                  ringBuffer
+);
+
+SKAPI_ATTR void* SKAPI_CALL skGetRingBufferDataBegin(
+  SkRingBuffer                  ringBuffer
+);
+
+SKAPI_ATTR void* SKAPI_CALL skGetRingBufferDataEnd(
+  SkRingBuffer                  ringBuffer
+);
+
 #endif //OPENSK_RINGBUFFER_H

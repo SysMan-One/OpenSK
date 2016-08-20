@@ -18,6 +18,8 @@ extern "C" {
 #include <stdint.h>
 #include <stddef.h>
 
+#define PRIskQ PRIu64
+
 #ifdef    __cplusplus
 }
 #endif // __cplusplus

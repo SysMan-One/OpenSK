@@ -136,3 +136,27 @@ SKAPI_ATTR void SKAPI_CALL skRingBufferClear(
 ) {
   ringBuffer->dataBegin = ringBuffer->dataEnd = ringBuffer->capacityBegin;
 }
+
+SKAPI_ATTR void* SKAPI_CALL skGetRingBufferCapacityBegin(
+  SkRingBuffer                  ringBuffer
+) {
+  return ringBuffer->capacityBegin;
+}
+
+SKAPI_ATTR void* SKAPI_CALL skGetRingBufferCapacityEnd(
+  SkRingBuffer                  ringBuffer
+) {
+  return ringBuffer->capacityEnd;
+}
+
+SKAPI_ATTR void* SKAPI_CALL skGetRingBufferDataBegin(
+  SkRingBuffer                  ringBuffer
+) {
+  return ringBuffer->dataBegin;
+}
+
+SKAPI_ATTR void* SKAPI_CALL skGetRingBufferDataEnd(
+  SkRingBuffer                  ringBuffer
+) {
+  return ringBuffer->dataEnd;
+}

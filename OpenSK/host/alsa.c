@@ -951,7 +951,7 @@ skStreamReadNoninterleavedMMap_ALSA(
 static SkResult
 skRequestPcmStreamIMPL(
   SkComponent                       component,
-  SkPcmStreamRequest*               pStreamRequest,
+  SkPcmStreamInfo*                  pStreamRequest,
   SkStream*                         pStream
 ) {
   int error;
@@ -1028,22 +1028,22 @@ skRequestPcmStreamIMPL(
     }
 
     // Period Time (Default = Minimum)
-    if (pStreamRequest->periodSize > 0) {
-      ufValue = pStreamRequest->periodSize; iValue = 0;
+    if (pStreamRequest->periodSamples > 0) {
+      ufValue = pStreamRequest->periodSamples; iValue = 0;
       PCM_CHECK(snd_pcm_hw_params_set_period_size_near(pcmHandle, hwParams, &ufValue, &iValue));
     }
-    else if (pStreamRequest->periodTime > 0) {
-      uiValue = pStreamRequest->periodTime; iValue = 0;
+    else if (!skTimePeriodIsZero(pStreamRequest->periodTime)) {
+      uiValue = (unsigned int)skTimePeriodToQuantum(pStreamRequest->periodTime, SK_TIME_UNITS_MICROSECONDS); iValue = 0;
       PCM_CHECK(snd_pcm_hw_params_set_period_time_near(pcmHandle, hwParams, &uiValue, &iValue));
     }
 
     // Buffer Size (Default = Maximum)
-    if (pStreamRequest->bufferSize > 0) {
-      ufValue = pStreamRequest->bufferSize; iValue = 0;
+    if (pStreamRequest->bufferSamples > 0) {
+      ufValue = pStreamRequest->bufferSamples; iValue = 0;
       PCM_CHECK(snd_pcm_hw_params_set_buffer_size_near(pcmHandle, hwParams, &ufValue));
     }
     else if (pStreamRequest->bufferTime > 0) {
-      uiValue = pStreamRequest->bufferSize; iValue = 0;
+      uiValue = (unsigned int)skTimePeriodToQuantum(pStreamRequest->bufferTime, SK_TIME_UNITS_MICROSECONDS); iValue = 0;
       PCM_CHECK(snd_pcm_hw_params_set_buffer_time_near(pcmHandle, hwParams, &uiValue, &iValue));
     }
 
@@ -1082,21 +1082,17 @@ skRequestPcmStreamIMPL(
     PCM_CHECK(snd_pcm_hw_params_get_rate(hwParams, &uiValue, &iValue));
     streamInfo.sampleRate = uiValue;
     streamInfo.sampleBits = streamInfo.channels * streamInfo.formatBits;
-    streamInfo.sampleTime = (uint32_t)(1000000 / streamInfo.sampleRate);
+    skTimePeriodSetQuantum(streamInfo.sampleTime, SK_TIME_QUANTUM_MAX / streamInfo.sampleRate, SK_TIME_UNITS_MIN);
     PCM_CHECK(snd_pcm_hw_params_get_periods(hwParams, &uiValue, &iValue));
     streamInfo.periods = uiValue;
     PCM_CHECK(snd_pcm_hw_params_get_period_size(hwParams, &ufValue, &iValue));
     streamInfo.periodSamples = (uint32_t)ufValue;
     streamInfo.periodBits = streamInfo.sampleBits * streamInfo.periodSamples;
-    PCM_CHECK(snd_pcm_hw_params_get_period_time(hwParams, &uiValue, &iValue));
-    streamInfo.periodTime = uiValue;
-    streamInfo.periodTime = (uint32_t)(1000000 * ((float)streamInfo.periodSamples / streamInfo.sampleRate));
+    skTimePeriodSetQuantum(streamInfo.periodTime, SK_TIME_QUANTUM_MAX * ((float)streamInfo.periodSamples / streamInfo.sampleRate), SK_TIME_UNITS_MIN);
     PCM_CHECK(snd_pcm_hw_params_get_buffer_size(hwParams, &ufValue));
     streamInfo.bufferSamples = (uint32_t)ufValue;
     streamInfo.bufferBits = streamInfo.bufferSamples * streamInfo.sampleBits;
-    streamInfo.bufferTime = (uint32_t)(1000000 * ((float)streamInfo.bufferSamples / streamInfo.sampleRate));
-    // latency = periodsize * periods / (rate * bytes_per_frame)
-    streamInfo.latencyTime = 1000000 * ((float)streamInfo.periods * streamInfo.periodSamples) / (streamInfo.sampleRate);
+    skTimePeriodSetQuantum(streamInfo.bufferTime, SK_TIME_QUANTUM_MAX * ((float)streamInfo.bufferSamples / streamInfo.sampleRate), SK_TIME_UNITS_MIN);
   } while (SK_FALSE);
   snd_pcm_hw_params_free(hwParams);
 
@@ -1156,7 +1152,7 @@ skRequestPcmStreamIMPL(
 static SkResult
 skRequestStream_ALSA(
   SkComponent                       component,
-  SkStreamRequest*                  pStreamRequest,
+  SkStreamInfo*                     pStreamRequest,
   SkStream*                         pStream
 ) {
   switch (pStreamRequest->streamType) {

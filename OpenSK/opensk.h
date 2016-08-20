@@ -133,10 +133,12 @@ typedef enum SkAccessMode {
 } SkAccessMode;
 
 typedef enum SkStreamFlags {
-  SK_STREAM_FLAGS_NONE,
-  SK_STREAM_FLAGS_POLL_AVAILABLE,
-  SK_STREAM_FLAGS_WAIT_AVAILABLE
+  SK_STREAM_FLAGS_NONE = 0,
+  SK_STREAM_FLAGS_POLL_AVAILABLE = 1<<0,
+  SK_STREAM_FLAGS_WAIT_AVAILABLE = 1<<1
 } SkStreamFlags;
+#define SK_STREAM_FLAGS_BEGIN SK_STREAM_FLAGS_POLL_AVAILABLE
+#define SK_STREAM_FLAGS_END (SK_STREAM_FLAGS_WAIT_AVAILABLE<<1)
 
 typedef enum SkFormat {
   SK_FORMAT_INVALID = -1,
@@ -185,6 +187,56 @@ typedef enum SkFormat {
 #define SK_FORMAT_DYNAMIC_BEGIN SK_FORMAT_S16
 #define SK_FORMAT_DYNAMIC_END SK_FORMAT_FLOAT64
 #define SK_FORMAT_MAX (SK_FORMAT_FLOAT64 + 1)
+
+typedef enum SkTimeUnits {
+  SK_TIME_UNITS_UNKNOWN,
+  SK_TIME_UNITS_PLANCKTIME,
+  SK_TIME_UNITS_PLANCKTIME_E3,
+  SK_TIME_UNITS_PLANCKTIME_E6,
+  SK_TIME_UNITS_PLANCKTIME_E9,
+  SK_TIME_UNITS_PLANCKTIME_E12,
+  SK_TIME_UNITS_PLANCKTIME_E15,
+  SK_TIME_UNITS_PLANCKTIME_E18,
+  SK_TIME_UNITS_YOCTOSECONDS,
+  SK_TIME_UNITS_ZEPTOSECONDS,
+  SK_TIME_UNITS_ATTOSECONDS,
+  SK_TIME_UNITS_FEMTOSECONDS,
+  SK_TIME_UNITS_PICOSECONDS,
+  SK_TIME_UNITS_NANOSECONDS,
+  SK_TIME_UNITS_MICROSECONDS,
+  SK_TIME_UNITS_MILLISECONDS,
+  SK_TIME_UNITS_SECONDS,
+  SK_TIME_UNITS_KILOSECONDS,
+  SK_TIME_UNITS_MEGASECONDS,
+  SK_TIME_UNITS_GIGASECONDS,
+  SK_TIME_UNITS_TERASECONDS,
+  SK_TIME_UNITS_PETASECONDS,
+  SK_TIME_UNITS_EXASECONDS,
+  SK_TIME_UNITS_ZETTASECONDS,
+  SK_TIME_UNITS_YOTTASECONDS
+} SkTimeUnits;
+
+#if defined(UINT64_MAX)
+typedef uint64_t SkTimeQuantum;
+#define SK_TIME_UNITS_MIN SK_TIME_UNITS_ATTOSECONDS
+#define SK_TIME_UNITS_MAX SK_TIME_UNITS_PETASECONDS
+#define SK_TIME_QUANTUM_MOD 1000000000000000000u
+#define SK_TIME_QUANTUM_MAX (SK_TIME_QUANTUM_MOD-1)
+#define SK_TIME_QUANTUM_BITS 64
+#elif defined(UINT32_MAX)
+typedef uint32_t SkTimeQuantum;
+#define SK_TIME_UNITS_MIN SK_TIME_UNITS_NANOSECONDS
+#define SK_TIME_UNITS_MAX SK_TIME_UNITS_MEGASECONDS
+#define SK_TIME_QUANTUM_MOD 1000000000u
+#define SK_TIME_QUANTUM_MAX (SK_TIME_QUANTUM_MOD-1)
+#define SK_TIME_QUANTUM_BITS 32
+#else
+# error "Unsupported machine configuration - must at least support 32-bit numbers!"
+#endif
+#define SK_TIME_PERIOD_HI 1
+#define SK_TIME_PERIOD_LO 0
+
+typedef SkTimeQuantum SkTimePeriod[2];
 
 typedef void* (SKAPI_PTR *PFN_skAllocationFunction)(
   void*                             pUserData,
@@ -277,26 +329,6 @@ typedef struct SkComponentLimits {
   SkBool32                          supportedFormats[SK_FORMAT_MAX];
 } SkComponentLimits;
 
-typedef struct SkPcmStreamRequest {
-  SkStreamType                      streamType;
-  SkAccessType                      accessType;
-  SkAccessMode                      accessMode;
-  SkStreamFlags                     streamFlags;
-  SkFormat                          formatType;
-  uint32_t                          channels;
-  uint32_t                          periods;
-  uint32_t                          periodSize;
-  uint32_t                          periodTime;
-  uint32_t                          sampleRate;
-  uint32_t                          bufferSize;
-  uint32_t                          bufferTime;
-} SkPcmStreamRequest;
-
-typedef union SkStreamRequest {
-  SkStreamType                      streamType;
-  SkPcmStreamRequest                pcm;
-} SkStreamRequest;
-
 typedef struct SkPcmStreamInfo {
   SkStreamType                      streamType;   // Should be one of the PCM stream types
   SkAccessMode                      accessMode;   // How the stream should be accessed (block/non-block)
@@ -307,15 +339,14 @@ typedef struct SkPcmStreamInfo {
   uint32_t                          channels;     // Number of channels in a sample
   uint32_t                          sampleRate;   // Number of samples per second
   uint32_t                          sampleBits;   // Number of bits in a sample
-  uint32_t                          sampleTime;   // Time in microseconds of a sample (approx.)
+  SkTimePeriod                      sampleTime;   // Calculated time each sample represents
   uint32_t                          periods;      // Number of periods
   uint32_t                          periodSamples;// Number of samples in a period
   uint32_t                          periodBits;   // Number of bits in a period
-  uint32_t                          periodTime;   // Time in microseconds of a period
+  SkTimePeriod                      periodTime;   // Calculated time each period represents
   uint32_t                          bufferSamples;// Number of samples in the back-buffer
   uint32_t                          bufferBits;   // Number of bits in the back-buffer
-  uint32_t                          bufferTime;   // Time in microseconds in the back-buffer
-  uint32_t                          latencyTime;  // Time in microseconds worth of latency
+  SkTimePeriod                      bufferTime;   // Calculated time the back-buffer represents
 } SkPcmStreamInfo;
 
 typedef union SkStreamInfo {
@@ -402,7 +433,7 @@ SKAPI_ATTR SkResult SKAPI_CALL skGetComponentLimits(
 
 SKAPI_ATTR SkResult SKAPI_CALL skRequestStream(
   SkComponent                       component,
-  SkStreamRequest*                  pStreamRequest,
+  SkStreamInfo*                     pStreamRequest,
   SkStream*                         pStream
 );
 
@@ -445,6 +476,74 @@ SKAPI_ATTR void SKAPI_CALL skDestroyStream(
 );
 
 ////////////////////////////////////////////////////////////////////////////////
+// Timer Functions
+////////////////////////////////////////////////////////////////////////////////
+
+SKAPI_ATTR SkTimeQuantum SKAPI_CALL skTimeQuantumConvert(
+  SkTimeQuantum                     timeQuantum,
+  SkTimeUnits                       fromTimeUnits,
+  SkTimeUnits                       toTimeUnits
+);
+
+SKAPI_ATTR void SKAPI_CALL skTimePeriodClear(
+  SkTimePeriod                      timePeriod
+);
+
+SKAPI_ATTR void SKAPI_CALL skTimePeriodSet(
+  SkTimePeriod                      result,
+  SkTimePeriod                      original
+);
+
+SKAPI_ATTR void SKAPI_CALL skTimePeriodSetQuantum(
+  SkTimePeriod                      timePeriod,
+  SkTimeQuantum                     timeQuantum,
+  SkTimeUnits                       timeUnits
+);
+
+SKAPI_ATTR void SKAPI_CALL skTimePeriodAdd(
+  SkTimePeriod                      resultTimePeriod,
+  SkTimePeriod                      leftTimePeriod,
+  SkTimePeriod                      rightTimePeriod
+);
+
+SKAPI_ATTR void SKAPI_CALL skTimePeriodScaleAdd(
+  SkTimePeriod                      resultTimePeriod,
+  SkTimeQuantum                     leftScalar,
+  SkTimePeriod                      leftTimePeriod,
+  SkTimePeriod                      rightTimePeriod
+);
+
+SKAPI_ATTR void SKAPI_CALL skTimePeriodSubtract(
+  SkTimePeriod                      resultTimePeriod,
+  SkTimePeriod                      leftTimePeriod,
+  SkTimePeriod                      rightTimePeriod
+);
+
+SKAPI_ATTR SkBool32 SKAPI_CALL skTimePeriodLess(
+  SkTimePeriod                      leftTimePeriod,
+  SkTimePeriod                      rightTimePeriod
+);
+
+SKAPI_ATTR SkBool32 SKAPI_CALL skTimePeriodLessEqual(
+  SkTimePeriod                      leftTimePeriod,
+  SkTimePeriod                      rightTimePeriod
+);
+
+SKAPI_ATTR SkBool32 SKAPI_CALL skTimePeriodIsZero(
+  SkTimePeriod                      timePeriod
+);
+
+SKAPI_ATTR float SKAPI_CALL skTimePeriodToFloat(
+  SkTimePeriod                      timePeriod,
+  SkTimeUnits                       timeUnits
+);
+
+SKAPI_ATTR SkTimeQuantum SKAPI_CALL skTimePeriodToQuantum(
+  SkTimePeriod                      timePeriod,
+  SkTimeUnits                       timeUnits
+);
+
+////////////////////////////////////////////////////////////////////////////////
 // Stringize Functions
 ////////////////////////////////////////////////////////////////////////////////
 SKAPI_ATTR char const* SKAPI_CALL skGetObjectTypeString(
@@ -453,6 +552,10 @@ SKAPI_ATTR char const* SKAPI_CALL skGetObjectTypeString(
 
 SKAPI_ATTR char const* SKAPI_CALL skGetStreamTypeString(
   SkStreamType                      streamType
+);
+
+SKAPI_ATTR char const* SKAPI_CALL skGetStreamFlagString(
+  SkStreamFlags                     streamFlag
 );
 
 SKAPI_ATTR char const* SKAPI_CALL skGetFormatString(
@@ -469,6 +572,14 @@ SKAPI_ATTR char const* SKAPI_CALL skGetAccessTypeString(
 
 SKAPI_ATTR SkFormat SKAPI_CALL skGetFormatStatic(
   SkFormat                          format
+);
+
+SKAPI_ATTR char const* SKAPI_CALL skGetTimeUnitsString(
+  SkTimeUnits                       timeUnits
+);
+
+SKAPI_ATTR char const* SKAPI_CALL skGetTimeUnitsSymbolString(
+  SkTimeUnits                       timeUnits
 );
 
 #ifdef    __cplusplus
