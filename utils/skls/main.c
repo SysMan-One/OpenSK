@@ -524,15 +524,18 @@ displayDevices(Display* display, SkDevice *devices, uint32_t deviceCount) {
     if (result != SK_SUCCESS) {
       ERR("Failed to query the number of components available on the device.\n");
     }
-    components = realloc(components, sizeof(SkComponent) * (totalComponentCount + componentCount));
-    if (!components) {
-      ERR("Failed to allocate enough information to store components!\n");
+    if (componentCount != 0)
+    {
+      components = realloc(components, sizeof(SkComponent) * (totalComponentCount + componentCount));
+      if (!components) {
+        ERR("Failed to allocate enough information to store components!\n");
+      }
+      result = skEnumerateComponents(devices[idx], &componentCount, &components[totalComponentCount]);
+      if (result != SK_SUCCESS) {
+        ERR("Failed to acquire the components available on the device.\n");
+      }
+      totalComponentCount += componentCount;
     }
-    result = skEnumerateComponents(devices[idx], &componentCount, &components[totalComponentCount]);
-    if (result != SK_SUCCESS) {
-      ERR("Failed to acquire the components available on the device.\n");
-    }
-    totalComponentCount += componentCount;
   }
 
   objectCount = deviceCount + totalComponentCount;
@@ -603,13 +606,16 @@ displayHostApi(Display* display, SkHostApi hostApi) {
     if (result != SK_SUCCESS) {
       ERR("Failed to query the number of physical devices available on the Host API.\n");
     }
-    devices = realloc(devices, sizeof(SkDevice) * physicalDeviceCount);
-    if (!devices) {
-      ERR("Failed to allocate enough information to store physical devices!\n");
-    }
-    result = skEnumeratePhysicalDevices(hostApi, &physicalDeviceCount, devices);
-    if (result != SK_SUCCESS) {
-      ERR("Failed to acquire the physical devices available on the Host API.\n");
+    if (physicalDeviceCount != 0)
+    {
+      devices = realloc(devices, sizeof(SkDevice) * physicalDeviceCount);
+      if (!devices) {
+        ERR("Failed to allocate enough information to store physical devices!\n");
+      }
+      result = skEnumeratePhysicalDevices(hostApi, &physicalDeviceCount, devices);
+      if (result != SK_SUCCESS) {
+        ERR("Failed to acquire the physical devices available on the Host API.\n");
+      }
     }
   }
   virtualDeviceCount = 0;
@@ -618,13 +624,16 @@ displayHostApi(Display* display, SkHostApi hostApi) {
     if (result != SK_SUCCESS) {
       ERR("Failed to query the number of virtual devices available on the Host API.\n");
     }
-    devices = realloc(devices, sizeof(SkDevice) * (physicalDeviceCount + virtualDeviceCount));
-    if (!devices) {
-      ERR("Failed to allocate enough information to store virtual devices!\n");
-    }
-    result = skEnumerateVirtualDevices(hostApi, &virtualDeviceCount, &devices[physicalDeviceCount]);
-    if (result != SK_SUCCESS) {
-      ERR("Failed to acquire the virtual devices available on the Host API.\n");
+    if (virtualDeviceCount != 0)
+    {
+      devices = realloc(devices, sizeof(SkDevice) * (physicalDeviceCount + virtualDeviceCount));
+      if (!devices) {
+        ERR("Failed to allocate enough information to store virtual devices!\n");
+      }
+      result = skEnumerateVirtualDevices(hostApi, &virtualDeviceCount, &devices[physicalDeviceCount]);
+      if (result != SK_SUCCESS) {
+        ERR("Failed to acquire the virtual devices available on the Host API.\n");
+      }
     }
   }
 

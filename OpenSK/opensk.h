@@ -38,6 +38,7 @@ typedef uint32_t SkFlags;
 #define SK_TRUE 1
 #define SK_FALSE 0
 #define SK_UNKNOWN -1
+#define SK_UUID_SIZE 256
 #define SK_MAX_EXTENSION_NAME_SIZE 256
 #define SK_MAX_DEVICE_NAME_SIZE 256
 #define SK_MAX_COMPONENT_NAME_SIZE 256
@@ -49,6 +50,9 @@ typedef uint32_t SkFlags;
 #define SK_MAX_COMPONENT_IDENTIFIER_SIZE 25
 #define SK_MAX_HOST_NAME_SIZE 256
 #define SK_MAX_HOST_DESC_SIZE 256
+#define SK_MAX_VENDOR_NAME_SIZE 256
+#define SK_MAX_MODEL_NAME_SIZE 256
+#define SK_MAX_SERIAL_NAME_SIZE 256
 
 ////////////////////////////////////////////////////////////////////////////////
 // Standard Types
@@ -238,6 +242,29 @@ typedef uint32_t SkTimeQuantum;
 
 typedef SkTimeQuantum SkTimePeriod[2];
 
+typedef enum SkTransportType {
+  SK_TRANSPORT_TYPE_UNKNOWN,
+  SK_TRANSPORT_TYPE_UNDEFINED,
+  SK_TRANSPORT_TYPE_PCI,
+  SK_TRANSPORT_TYPE_USB,
+  SK_TRANSPORT_TYPE_FIREWIRE,
+  SK_TRANSPORT_TYPE_BLUETOOTH,
+  SK_TRANSPORT_TYPE_THUNDERBOLT
+} SkTransportType;
+
+typedef enum SkFormFactor {
+  SK_FORM_FACTOR_UNKNOWN,
+  SK_FORM_FACTOR_UNDEFINED,
+  SK_FORM_FACTOR_INTERNAL,
+  SK_FORM_FACTOR_MICROPHONE,
+  SK_FORM_FACTOR_SPEAKER,
+  SK_FORM_FACTOR_HEADPHONE,
+  SK_FORM_FACTOR_WEBCAM,
+  SK_FORM_FACTOR_HEADSET,
+  SK_FORM_FACTOR_HANDSET,
+  SK_FORM_FACTOR_TELEVISION
+} SkFormFactor;
+
 typedef void* (SKAPI_PTR *PFN_skAllocationFunction)(
   void*                             pUserData,
   size_t                            size,
@@ -294,13 +321,25 @@ typedef struct SkExtensionProperties {
   uint32_t                          specVersion;
 } SkExtensionProperties;
 
+
 typedef struct SkDeviceProperties {
-  char                              identifier[SK_MAX_DEVICE_IDENTIFIER_SIZE];
-  char                              deviceName[SK_MAX_DEVICE_NAME_SIZE];
-  char                              driverName[SK_MAX_DRIVER_NAME_SIZE];
-  char                              mixerName[SK_MAX_MIXER_NAME_SIZE];
-  uint32_t                          componentCount;
-  SkBool32                          isPhysical;
+  // Device Properties
+  char                              identifier[SK_MAX_DEVICE_IDENTIFIER_SIZE];  // SK Canonical Device Identifier (ex. pda)
+  char                              deviceName[SK_MAX_DEVICE_NAME_SIZE];        // Pretty Device Name (ex. HDA Nvidia)
+  char                              driverName[SK_MAX_DRIVER_NAME_SIZE];        // Pretty Driver Name (ex. USB-Audio)
+  char                              mixerName[SK_MAX_MIXER_NAME_SIZE];          // Pretty Mixer Name (ex. USB Mixer)
+  uint32_t                          componentCount;                             // Number of components this device owns
+  SkBool32                          isPhysical;                                 // Whether or not the device (and it's components) are physical
+  // Hardware Properties
+  char                              deviceUUID[SK_UUID_SIZE];                   // The UUID for this device under this transport
+  char                              vendorUUID[SK_UUID_SIZE];                   // The UUID for the vendor
+  char                              vendorName[SK_MAX_VENDOR_NAME_SIZE];        // The name of the vendor
+  char                              modelUUID[SK_UUID_SIZE];                    // The UUID for the model
+  char                              modelName[SK_MAX_MODEL_NAME_SIZE];          // The name of the model
+  char                              serialUUID[SK_UUID_SIZE];                   // The UUID for the serial
+  char                              serialName[SK_MAX_SERIAL_NAME_SIZE];        // The name of the serial
+  SkTransportType                   transportType;                              // The transport type
+  SkFormFactor                      formFactor;                                 // The form factor
 } SkDeviceProperties;
 
 typedef struct SkComponentProperties {

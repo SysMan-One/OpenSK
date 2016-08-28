@@ -25,11 +25,13 @@
 static SkResult
 skExpandEnvironmentIMPL(
   char const*                 patternName,
-  char*                       pBuffer
+  char*                       pBuffer,
+  size_t                      n
 ) {
   ptrdiff_t expansionSize;
   char const *expansion;
   char const *patternEnd;
+  char const *pBufferEnd = pBuffer + n - 1;
   while (*patternName) {
 
     // Expand Pattern
@@ -44,19 +46,18 @@ skExpandEnvironmentIMPL(
 
       // Expand supported patterns
       if (strncmp(patternName, "HOME", (size_t)expansionSize) == 0) {
-        expansion = skGetHomeDirectoryUTL();
+        pBuffer = skGetHomeDirectoryUTL(pBuffer, pBufferEnd - pBuffer);
       }
       else if (strncmp(patternName, "TERM", (size_t)expansionSize) == 0) {
-        expansion = skGetTerminalNameUTL();
+        pBuffer = skGetTerminalNameUTL(pBuffer, pBufferEnd - pBuffer);
+      }
+      else if (strncmp(patternName, "BINARY", (size_t)expansionSize) == 0) {
+        pBuffer = skGetBinaryDirectoryUTL(pBuffer, pBufferEnd - pBuffer);
       }
       else {
         return SK_ERROR_UNKNOWN;
       }
 
-      // Copy the supported pattern into pBuffer
-      if (expansion) {
-        while (*expansion) { *pBuffer = *expansion; ++pBuffer; ++expansion; }
-      }
       patternName = patternEnd + 1;
     }
     else {
@@ -72,18 +73,31 @@ skExpandEnvironmentIMPL(
 ////////////////////////////////////////////////////////////////////////////////
 // Utility: Device Information
 ////////////////////////////////////////////////////////////////////////////////
-char const*
-skGetHomeDirectoryUTL() {
+char *
+skGetHomeDirectoryUTL(char *pBuffer, size_t n) {
   char const *homedir;
   if ((homedir = getenv("HOME")) == NULL) {
     homedir = getpwuid(getuid())->pw_dir;
   }
-  return homedir;
+  strncpy(pBuffer, homedir, n);
+  return pBuffer + strlen(homedir);
 }
 
-char const*
-skGetTerminalNameUTL() {
-  return getenv("TERM");
+char *
+skGetTerminalNameUTL(char *pBuffer, size_t n) {
+  char const* term = getenv("TERM");
+  strncpy(pBuffer, term, n);
+  return pBuffer + strlen(term);
+}
+
+char *
+skGetBinaryDirectoryUTL(char *pBuffer, size_t n) {
+  readlink("/proc/self/exe", pBuffer, n);
+  char *lastChar = strrchr(pBuffer, '/');
+  if (lastChar) {
+    (*lastChar) = '\0';
+  }
+  return lastChar;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -183,6 +197,8 @@ static char const *
 SkConstructColorDatabaseFilenamesIMPL[] = {
   "/etc/SKCOLORS",
   "/etc/SKCOLORS.${TERM}",
+  "${BINARY}/SKCOLORS",
+  "${BINARY}/SKCOLORS.${TERM}",
   "${HOME}/.skcolors",
   "${HOME}/.skcolors.${TERM}"
 };
@@ -414,7 +430,7 @@ skConstructColorDatabaseUTL(
 
   // Parse all of the possible color settings files
   for (idx = 0; idx < sizeof(SkConstructColorDatabaseFilenamesIMPL) / sizeof(char const*); ++idx) {
-    result = skExpandEnvironmentIMPL(SkConstructColorDatabaseFilenamesIMPL[idx], buffer);
+    result = skExpandEnvironmentIMPL(SkConstructColorDatabaseFilenamesIMPL[idx], buffer, 2046);
     if (result != SK_SUCCESS) {
       SKFREE(pAllocator, db);
       return result;

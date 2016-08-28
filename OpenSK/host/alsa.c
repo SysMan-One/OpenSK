@@ -4,21 +4,29 @@
  * OpenSK standard implementation. (ALSA Implementation)
  ******************************************************************************/
 
+// OpenSK
 #include <OpenSK/opensk.h>
 #include <OpenSK/dev/assert.h>
 #include <OpenSK/dev/hosts.h>
 #include <OpenSK/dev/macros.h>
+
+// C99
 #include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+
+// ALSA
 #include <alsa/asoundlib.h>
+
+// UDEV
+#ifdef    PLUGIN_UDEV
+#include <libudev.h>
+#include <ctype.h>
+#endif // PLUGIN_UDEV
 
 #define SK_ALSA_VIRTUAL_DEVICE_CARD_ID -1
 #define SK_ALSA_MAX_IDENTIFIER_SIZE 256
-
-#define _MIN(a, b) (((a) < (b)) ? (a) : (b))
-#define _MAX(a, b) (((a) > (b)) ? (a) : (b))
 
 ////////////////////////////////////////////////////////////////////////////////
 // Internal Types
@@ -31,6 +39,9 @@ typedef struct SkLimitsContainerIMPL {
 #define host_cast(h) ((SkHostApi_ALSA*)h)
 typedef struct SkHostApi_ALSA {
   SkHostApi_T                   parent;
+#ifdef    PLUGIN_UDEV
+  struct udev*                  udev;
+#endif // PLUGIN_UDEV
 } SkHostApi_ALSA;
 
 #define dev_cast(d) ((SkDevice_ALSA*)d)
@@ -576,6 +587,312 @@ skUpdatePhysicalDeviceIMPL(
   return result;
 }
 
+#ifdef    PLUGIN_UDEV
+
+#define isnum(a) (a >= '0' && a <= '9')
+#define isanum(a) (a >= 'a' && a <= 'f')
+#define tonum(a) (a - '0')
+#define toanum(a)(a - 'a' + 10)
+
+static int
+decodeHexCharacter(char c) {
+  c = (char)tolower(c);
+  if (isnum(c)) {
+    return tonum(c);
+  }
+  else if (isanum(c)) {
+    return toanum(c);
+  }
+  return -1;
+}
+
+static int
+decodeStringEscape(char **dest, char const **src, size_t *length) {
+  int digits[2];
+  size_t decode;
+  switch (**src) {
+    case '\\':
+      **dest = '\\';
+      ++*dest;
+      --*length;
+      break;
+    case 'x':
+    case 'X':
+      ++*src;
+      digits[0] = decodeHexCharacter(**src) * 16;
+      if (digits[0] == -1) {
+        return -1;
+      }
+      ++*src;
+      digits[1] = decodeHexCharacter(**src);
+      if (digits[1] == -1) {
+        return -1;
+      }
+      **dest = (char)(digits[0] + digits[1]);
+      ++*dest;
+      --*length;
+      break;
+    default:
+      return -1;
+  }
+}
+
+static int
+decodeString(char *dest, char const *src, size_t length) {
+  // Note: Always remove one length value for endline
+  --length;
+  while (*src && length) {
+    switch (*src) {
+      case '\\':
+        ++src;
+        if (decodeStringEscape(&dest, &src, &length) == -1) {
+          return -1;
+        }
+        break;
+      default:
+        --length;
+        *dest++ = *src++;
+        break;
+    }
+  }
+  *dest = '\0';
+  return 0;
+}
+
+/**
+ * TODO: Unfortunately, after much research, I've found that libudev decides
+ *       a lot of things in a fairly hacky way. For example, form factor is
+ *       determined by a string compare with the product name. If the name
+ *       contains a string like "[sS]peaker", the form factor is "speaker".
+ *       The problem with this is not manny products say what they are in the
+ *       product name. Not to mention this information _is_ available by the
+ *       USB standard in a safer way. The underlying problem seems to be that
+ *       sysfs doesn't make this information available, and libdev is built
+ *       on sysfs information.
+ *       For now, we accept this shortcoming - in the future we may have to
+ *       construct more reliable code to extract this information.
+ */
+static SkResult
+skUpdatePhysicalUdevDeviceIMPL(
+  SkHostApi                           hostApi,
+  struct udev_device*                 uParent,
+  struct udev_device*                 uDevice
+) {
+  SkBool32 flag;
+  int cardNumber;
+  char const* pCharConst;
+  SkDevice pDevice;
+  SkDeviceProperties *deviceProperties;
+
+  // Find the audio subsystem:ALSA device pairing.
+  pCharConst = udev_device_get_sysnum(uDevice);
+  if (!pCharConst)
+  {
+    SKWARN("Found an audio subsystem device without a system number.");
+    return SK_INCOMPLETE;
+  }
+  cardNumber = atoi(pCharConst);
+  pDevice = skGetDeviceByCardIMPL(hostApi->pDevices, cardNumber);
+  if (!pDevice)
+  {
+    SKWARN("Found an audio subsystem device without a corresponding ALSA device.");
+    return SK_INCOMPLETE;
+  }
+  deviceProperties = &pDevice->properties;
+
+  // Get the subsystem (transport type)
+  pCharConst = udev_device_get_subsystem(uParent);
+  if (!pCharConst) {
+    pCharConst = udev_device_get_sysname(uParent);
+    SKWARN("Undefined transport type for device: '%s'.\n", pCharConst);
+    deviceProperties->transportType = SK_TRANSPORT_TYPE_UNDEFINED;
+  }
+  else if (strcmp(pCharConst, "usb") == 0) {
+    deviceProperties->transportType = SK_TRANSPORT_TYPE_USB;
+  }
+  else if (strcmp(pCharConst, "pci") == 0) {
+    deviceProperties->transportType = SK_TRANSPORT_TYPE_PCI;
+  }
+  // NOTE: ALSA doesn't readily support bluetooth, leaving this in in case it changes.
+  else if (strcmp(pCharConst, "bluetooth") == 0) {
+    deviceProperties->transportType = SK_TRANSPORT_TYPE_BLUETOOTH;
+  }
+  // TODO: Theoretical - Need someone to test this!
+  else if (strcmp(pCharConst, "firewire") == 0) {
+    deviceProperties->transportType = SK_TRANSPORT_TYPE_FIREWIRE;
+  }
+  // TODO: Theoretical - Need someone to test this!
+  else if (strcmp(pCharConst, "thunderbolt") == 0) {
+    deviceProperties->transportType = SK_TRANSPORT_TYPE_THUNDERBOLT;
+  }
+  else {
+    SKWARN("Unknown transport type: '%s'.\n", pCharConst);
+    deviceProperties->transportType = SK_TRANSPORT_TYPE_UNKNOWN;
+  }
+
+  // Get the form factor
+  pCharConst = udev_device_get_property_value(uDevice, "SOUND_FORM_FACTOR");
+  if (!pCharConst) {
+    deviceProperties->formFactor = SK_FORM_FACTOR_UNDEFINED;
+  }
+  else if (strcmp(pCharConst, "internal") == 0) {
+    deviceProperties->formFactor = SK_FORM_FACTOR_INTERNAL;
+  }
+  else if (strcmp(pCharConst, "microphone") == 0) {
+    deviceProperties->formFactor = SK_FORM_FACTOR_MICROPHONE;
+  }
+  else if (strcmp(pCharConst, "speaker") == 0) {
+    deviceProperties->formFactor = SK_FORM_FACTOR_SPEAKER;
+  }
+  else if (strcmp(pCharConst, "headphone") == 0) {
+    deviceProperties->formFactor = SK_FORM_FACTOR_HEADPHONE;
+  }
+  else if (strcmp(pCharConst, "headset") == 0) {
+    deviceProperties->formFactor = SK_FORM_FACTOR_HEADSET;
+  }
+  else if (strcmp(pCharConst, "webcam") == 0) {
+    deviceProperties->formFactor = SK_FORM_FACTOR_WEBCAM;
+  }
+  else if (strcmp(pCharConst, "headset") == 0) {
+    deviceProperties->formFactor = SK_FORM_FACTOR_HEADSET;
+  }
+  else if (strcmp(pCharConst, "handset") == 0) {
+    deviceProperties->formFactor = SK_FORM_FACTOR_HANDSET;
+  }
+  else {
+    SKWARN("Unknown form factor: '%s'.\n", pCharConst);
+    deviceProperties->formFactor = SK_FORM_FACTOR_UNKNOWN;
+  }
+
+  // Get the Vendor name
+  // Note: Flag denotes whether or not the string is encoded
+  flag = SK_FALSE;
+  pCharConst = udev_device_get_property_value(uDevice, "ID_VENDOR_FROM_DATABASE");
+  if (!pCharConst) {
+    flag = SK_TRUE;
+    pCharConst = udev_device_get_property_value(uDevice, "ID_VENDOR_ENC");
+  }
+  if (!pCharConst) {
+    flag = SK_FALSE;
+    pCharConst = udev_device_get_property_value(uDevice, "ID_VENDOR");
+  }
+  if (pCharConst) {
+    if (!flag || decodeString(deviceProperties->vendorName, pCharConst, SK_MAX_VENDOR_NAME_SIZE) == -1) {
+      strncpy(deviceProperties->vendorName, pCharConst, SK_MAX_VENDOR_NAME_SIZE);
+    }
+  }
+
+  // Get the Model name
+  // Note: Flag denotes whether or not the string is encoded
+  flag = SK_FALSE;
+  pCharConst = udev_device_get_property_value(uDevice, "ID_MODEL_FROM_DATABASE");
+  if (!pCharConst) {
+    flag = SK_TRUE;
+    pCharConst = udev_device_get_property_value(uDevice, "ID_MODEL_ENC");
+  }
+  if (!pCharConst) {
+    flag = SK_FALSE;
+    pCharConst = udev_device_get_property_value(uDevice, "ID_MODEL");
+  }
+  if (pCharConst) {
+    if (!flag || decodeString(deviceProperties->modelName, pCharConst, SK_MAX_MODEL_NAME_SIZE) == -1) {
+      strncpy(deviceProperties->modelName, pCharConst, SK_MAX_MODEL_NAME_SIZE);
+    }
+  }
+
+  // Get the Serial name
+  pCharConst = udev_device_get_property_value(uDevice, "ID_SERIAL");
+  if (!pCharConst) {
+    pCharConst = udev_device_get_property_value(uDevice, "ID_SERIAL_SHORT");
+  }
+  if (pCharConst) {
+    strncpy(deviceProperties->serialName, pCharConst, SK_MAX_SERIAL_NAME_SIZE);
+  }
+
+  // Get Vendor ID
+  pCharConst = udev_device_get_property_value(uDevice, "ID_VENDOR_ID");
+  if (pCharConst) {
+    strncpy(deviceProperties->vendorUUID, pCharConst, SK_UUID_SIZE);
+  }
+
+  // Get Model ID
+  pCharConst = udev_device_get_property_value(uDevice, "ID_MODEL_ID");
+  if (pCharConst) {
+    strncpy(deviceProperties->modelUUID, pCharConst, SK_UUID_SIZE);
+  }
+
+  // Get Serial ID
+  pCharConst = udev_device_get_property_value(uDevice, "ID_SERIAL");
+  if (!pCharConst) {
+    pCharConst = udev_device_get_property_value(uDevice, "ID_SERIAL_SHORT");
+  }
+  if (pCharConst) {
+    strncpy(deviceProperties->serialUUID, pCharConst, SK_UUID_SIZE);
+  }
+
+  // Generate device ID
+  // NOTE: This is one of: ID_FOR_SEAT, ID_PATH, ID_PATH_TAG, DEVPATH in that order
+  //       Fallback is {vendorUUID}{modelUUID}{serialUUID} all appended together.
+  pCharConst = udev_device_get_property_value(uDevice, "ID_FOR_SEAT");
+  if (!pCharConst) {
+    pCharConst = udev_device_get_property_value(uDevice, "ID_PATH");
+  }
+  if (!pCharConst) {
+    pCharConst = udev_device_get_property_value(uDevice, "ID_PATH_TAG");
+  }
+  if (!pCharConst) {
+    pCharConst = udev_device_get_property_value(uDevice, "DEVPATH");
+  }
+  if (pCharConst) {
+    strncpy(deviceProperties->deviceUUID, pCharConst, SK_UUID_SIZE);
+  }
+  else {
+    char *out = deviceProperties->deviceUUID;
+    char const* end = out + SK_UUID_SIZE;
+    strncpy(out, deviceProperties->vendorUUID, end - out);
+    out += strlen(out);
+    strncpy(out, deviceProperties->modelUUID, end - out);
+    out += strlen(out);
+    strncpy(out, deviceProperties->serialUUID, end - out);
+  }
+
+  return SK_SUCCESS;
+}
+
+static SkResult
+skUpdatePhysicalUdevComponentIMPL(
+  SkHostApi                           hostApi,
+  struct udev_device*                 uParent,
+  struct udev_device*                 uDevice
+) {
+  // Right now, we don't have any need for component-level UDEV.
+}
+
+static SkResult
+skUpdatePhysicalUdevIMPL(
+  SkHostApi                           hostApi,
+  struct udev_device*                 uDevice
+) {
+  char const* pCharConst;
+  struct udev_device* uParent;
+
+  uParent = udev_device_get_parent(uDevice);
+
+  if (uParent) {
+    // Check if this is a UDEV "card"
+    pCharConst = udev_device_get_subsystem(uParent);
+    if (strcmp(pCharConst, "sound") != 0) {
+      return skUpdatePhysicalUdevDeviceIMPL(hostApi, uParent, uDevice);
+    }
+    // Otherwise, this must be a UDEV "device"
+    else {
+      return skUpdatePhysicalUdevComponentIMPL(hostApi, uParent, uDevice);
+    }
+  }
+}
+
+#endif // PLUGIN_UDEV
+
 static SkResult
 skUpdateVirtualDeviceIMPL(
   SkHostApi                           hostApi,
@@ -655,6 +972,14 @@ SkResult skHostApiInit_ALSA(
   strcpy(hostApi->properties.description, "User space library (alsa-lib) to simplify application programming and provide higher level functionality.");
   hostApi->properties.capabilities = SK_HOST_CAPABILITIES_PCM | SK_HOST_CAPABILITIES_SEQUENCER;
 
+  // If UDEV is linked in, add udev support
+#ifdef    PLUGIN_UDEV
+  host_cast(hostApi)->udev = udev_new();
+  if (!host_cast(hostApi)->udev) {
+    SKWARN("Cannot create udev instance, device hotswapping might not be accurate.\n");
+  }
+#endif // PLUGIN_UDEV
+
   *pHostApi = hostApi;
   return SK_SUCCESS;
 }
@@ -671,7 +996,7 @@ skHostApiScan_ALSA(
 
   result = SK_SUCCESS;
 
-  // Physical Devices
+  // Physical Devices (ALSA)
   card = -1;
   for(;;) {
     // Attempt to open the next card
@@ -686,6 +1011,33 @@ skHostApiScan_ALSA(
       result = opResult;
     }
   }
+
+  // If udev support exists, flesh-out metadata.
+#ifdef    PLUGIN_UDEV
+
+  // Physical Devices (UDEV)
+  {
+    struct udev_enumerate* enumerate;
+    struct udev_list_entry* devices, *iterator;
+    struct udev_device* device;
+
+    // Enumerate all "sound" subsystem devices
+    enumerate = udev_enumerate_new(host_cast(hostApi)->udev);
+    udev_enumerate_add_match_subsystem(enumerate, "sound");
+    udev_enumerate_scan_devices(enumerate);
+    devices = udev_enumerate_get_list_entry(enumerate);
+
+    // Process each subsystem device
+    udev_list_entry_foreach(iterator, devices) {
+      char const *path;
+      path = udev_list_entry_get_name(iterator);
+      device = udev_device_new_from_syspath(host_cast(hostApi)->udev, path);
+      skUpdatePhysicalUdevIMPL(hostApi, device);
+      udev_device_unref(device);
+    }
+  }
+
+#endif // PLUGIN_UDEV
 
   // Virtual Devices
   {
@@ -868,7 +1220,7 @@ update_stream_state(SkStream_ALSA *stream) {
 #define ALSA_STREAM_OPERATION(fn,cast)                                        \
 snd_pcm_sframes_t err = update_stream_state(stream_cast(stream));             \
 if (err > 0) {                                                                \
-  err = fn(stream_cast(stream)->handle, (cast)pBuffer, _MIN(samples, err));   \
+  err = fn(stream_cast(stream)->handle, (cast)pBuffer, SKMIN(samples, err));  \
   if (err < 0) {                                                              \
     return xrun_recovery(stream_cast(stream)->handle, err);                   \
   }                                                                           \

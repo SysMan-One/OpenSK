@@ -71,12 +71,20 @@ install(
   FILES
     OpenSK/opensk.h
     OpenSK/opensk_platform.h
+  DESTINATION include/OpenSK
+)
+install(
+  FILES
     OpenSK/dev/assert.h
     OpenSK/dev/hosts.h
     OpenSK/dev/macros.h
+  DESTINATION include/OpenSK/dev
+)
+install(
+  FILES
     OpenSK/ext/utils.h
     OpenSK/ext/ringbuffer.h
-  DESTINATION include
+  DESTINATION include/OpenSK/ext
 )
 install(
   TARGETS sk skx

@@ -19,7 +19,6 @@
 #include <stdlib.h>
 #include <inttypes.h>
 #include <ctype.h>
-#include <opensk.h>
 
 // Non-Standard Headers
 #include <sys/ioctl.h>
