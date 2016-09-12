@@ -4,41 +4,19 @@
  * OpenSK standard include header. (Implementation must adhere to this API)
  ******************************************************************************/
 
-#include "opensk.h"
-#include "dev/assert.h"
-#include "dev/hosts.h"
-#include "dev/macros.h"
+// OpenSK
+#include <OpenSK/opensk.h>
+#include <OpenSK/dev/assert.h>
+#include <OpenSK/dev/hosts.h>
+#include <OpenSK/dev/macros.h>
+
+// C99
 #include <stdlib.h>
 #include <string.h>
 
 ////////////////////////////////////////////////////////////////////////////////
 // Internal Types
 ////////////////////////////////////////////////////////////////////////////////
-void* SkDefaultAllocationFunction(
-  void*               pUserData,
-  size_t              size,
-  size_t              alignment,
-  SkAllocationScope   scope
-) {
-  (void)scope;
-  (void)pUserData;
-  return aligned_alloc(alignment, size);
-}
-
-void* SkDefaultFreeFunction(
-  void*               pUserData,
-  void*               memory
-) {
-  (void)pUserData;
-  free(memory);
-}
-
-SkAllocationCallbacks SkDefaultAllocationCallbacks = {
-  NULL,
-  &SkDefaultAllocationFunction,
-  &SkDefaultFreeFunction
-};
-
 #define BIND_HOSTAPI(name) &skProcedure_##name
 static const PFN_skProcedure hostApiProcedures[] = {
 #ifdef HOST_ALSA
@@ -62,20 +40,24 @@ skIsFloatBigEndianIMPL() {
 ////////////////////////////////////////////////////////////////////////////////
 // Helper Functions
 ////////////////////////////////////////////////////////////////////////////////
-static int
-pathcmp(char const* lhs, char const* rhs) {
-  while (*lhs && *rhs && *lhs == *rhs && *lhs != '/') {
-    ++lhs; ++rhs;
+static int skPathCompareIMPL(
+  char const*                           lhsPath,
+  char const*                           rhsPath
+) {
+  while (*lhsPath && *rhsPath && *lhsPath == *rhsPath && *lhsPath != '/') {
+    ++lhsPath; ++rhsPath;
   }
-  return ((*lhs == '\0' || *rhs == '/') && (*rhs == '\0' || *rhs == '/')) ? 1 : 0;
+  return ((*lhsPath == '\0' || *rhsPath == '/') && (*rhsPath == '\0' || *rhsPath == '/')) ? 1 : 0;
 }
 
 #define ptrdiff(lhs, rhs) (((unsigned char*)lhs) - ((unsigned char*)rhs))
-static int
-_lltoa(char *begin, long long value) {
+static int skLongLongToAsciiIMPL(
+  char*                                 pDestination,
+  long long                             value
+) {
   char tmp;
   long long prev;
-  char *end = begin;
+  char *end = pDestination;
   size_t bytes;
 
   // Write the integer to the destination
@@ -92,68 +74,66 @@ _lltoa(char *begin, long long value) {
 
   // Apply the null-termination
   *end = '\0';
-  bytes = ptrdiff(end--, begin);
+  bytes = ptrdiff(end--, pDestination);
 
   // Reverse the integer
-  while (begin < end) {
-    tmp = *begin;
-    *begin++ = *end;
+  while (pDestination < end) {
+    tmp = *pDestination;
+    *pDestination++ = *end;
     *end-- = tmp;
   }
 
   return (int)bytes;
 }
+#undef ptrdiff
 
-static int
-itoa(char *dest, int value) {
-  return _lltoa(dest, value);
-}
-
-static int
-ltoa(char *dest, long value) {
-  return _lltoa(dest, value);
-}
-
-static int
-lltoa(char *dest, long long value) {
-  return _lltoa(dest, value);
+static int skIntToAsciiIMPL(
+  char*                                 pDestination,
+  int                                   value
+) {
+  return skLongLongToAsciiIMPL(pDestination, value);
 }
 
 #define ALPHABET_CHARACTERS 26
-static SkResult
-skGenerateObjectIdentifierIMPL(char *buffer, char const *prefix, uint32_t number) {
+static SkResult skGenerateObjectIdentifierIMPL(
+  char*                                 pDestination,
+  char const*                           pPrefix,
+  uint32_t                              objectId
+) {
   uint32_t tmpA, tmpB;
-  uint32_t length = (uint32_t)strlen(prefix);
-  if (number < ALPHABET_CHARACTERS) {
-    memcpy(buffer, prefix, length);
-    buffer[length] = (char)('a' + number);
+  uint32_t length = (uint32_t)strlen(pPrefix);
+  if (objectId < ALPHABET_CHARACTERS) {
+    memcpy(pDestination, pPrefix, length);
+    pDestination[length] = (char)('a' + objectId);
     length += 1;
   }
-  else if (number < ALPHABET_CHARACTERS * ALPHABET_CHARACTERS) {
-    memcpy(buffer, prefix, length);
-    buffer[length + 0] = (char)('a' + (number / ALPHABET_CHARACTERS) - 1);
-    buffer[length + 1] = (char)('a' + (number % ALPHABET_CHARACTERS));
+  else if (objectId < ALPHABET_CHARACTERS * ALPHABET_CHARACTERS) {
+    memcpy(pDestination, pPrefix, length);
+    pDestination[length + 0] = (char)('a' + (objectId / ALPHABET_CHARACTERS) - 1);
+    pDestination[length + 1] = (char)('a' + (objectId % ALPHABET_CHARACTERS));
     length += 2;
   }
-  else if (number < ALPHABET_CHARACTERS * ALPHABET_CHARACTERS * ALPHABET_CHARACTERS) {
-    memcpy(buffer, prefix, length);
-    tmpA = number / (ALPHABET_CHARACTERS * ALPHABET_CHARACTERS);
-    tmpB = number - (tmpA * ALPHABET_CHARACTERS * ALPHABET_CHARACTERS);
-    buffer[length + 0] = (char)('a' + tmpA - 1);
-    buffer[length + 1] = (char)('a' + tmpB / (ALPHABET_CHARACTERS) - 1);
-    buffer[length + 2] = (char)('a' + ((number - tmpB) % ALPHABET_CHARACTERS));
+  else if (objectId < ALPHABET_CHARACTERS * ALPHABET_CHARACTERS * ALPHABET_CHARACTERS) {
+    memcpy(pDestination, pPrefix, length);
+    tmpA = objectId / (ALPHABET_CHARACTERS * ALPHABET_CHARACTERS);
+    tmpB = objectId - (tmpA * ALPHABET_CHARACTERS * ALPHABET_CHARACTERS);
+    pDestination[length + 0] = (char)('a' + tmpA - 1);
+    pDestination[length + 1] = (char)('a' + tmpB / (ALPHABET_CHARACTERS) - 1);
+    pDestination[length + 2] = (char)('a' + ((objectId - tmpB) % ALPHABET_CHARACTERS));
     length += 3;
   }
   else {
     // Anything past three identifiers isn't supported
     return SK_ERROR_INITIALIZATION_FAILED;
   }
-  buffer[length + 1] = '\0';
+  pDestination[length + 1] = '\0';
   return SK_SUCCESS;
 }
 
-SKAPI_ATTR SkResult SKAPI_CALL
-skGenerateDeviceIdentifier(char *identifier, SkDevice device) {
+SKAPI_ATTR SkResult SKAPI_CALL skGenerateDeviceIdentifier(
+  char*                                 identifier,
+  SkDevice                              device
+) {
   uint32_t count;
   SkDevice countDevice;
   SKASSERT(identifier != NULL, "Must have a location to write the identifier to.\n");
@@ -178,8 +158,10 @@ skGenerateDeviceIdentifier(char *identifier, SkDevice device) {
   return skGenerateObjectIdentifierIMPL(identifier, (device->properties.isPhysical) ? "pd" : "vd", count);
 }
 
-SKAPI_ATTR SkResult SKAPI_CALL
-skGenerateComponentIdentifier(char *identifier, SkComponent component) {
+SKAPI_ATTR SkResult SKAPI_CALL skGenerateComponentIdentifier(
+  char*                                 identifier,
+  SkComponent                           component
+) {
   uint32_t count;
   SkComponent countComponent;
   SKASSERT(identifier != NULL, "Must have a location to write the identifier to.\n");
@@ -201,12 +183,16 @@ skGenerateComponentIdentifier(char *identifier, SkComponent component) {
 
   // This can't fail, just assign the device's identifier and then add the count
   strcpy(identifier, component->device->properties.identifier);
-  itoa(&identifier[strlen(identifier)], count);
+  skIntToAsciiIMPL(&identifier[strlen(identifier)], count);
   return SK_SUCCESS;
 }
 
-SKAPI_ATTR SkResult SKAPI_CALL
-skConstructHostApi(SkInstance instance, size_t hostApiSize, PFN_skProcedure proc, SkHostApi* pHostApi) {
+SKAPI_ATTR SkResult SKAPI_CALL skCreateHostApi(
+  SkInstance                            instance,
+  size_t                                hostApiSize,
+  PFN_skProcedure                       proc,
+  SkHostApi*                            pHostApi
+) {
   SkHostApi hostApi;
 
   // Allocate the hostApi
@@ -230,8 +216,12 @@ skConstructHostApi(SkInstance instance, size_t hostApiSize, PFN_skProcedure proc
   return SK_SUCCESS;
 }
 
-SKAPI_ATTR SkResult SKAPI_CALL
-skConstructDevice(SkHostApi hostApi, size_t deviceSize, SkBool32 isPhysical, SkDevice *pDevice) {
+SKAPI_ATTR SkResult SKAPI_CALL skCreateDevice(
+  SkHostApi                             hostApi,
+  size_t                                deviceSize,
+  SkBool32                              isPhysical,
+  SkDevice*                             pDevice
+) {
   SkResult result;
   SkDevice device;
 
@@ -262,8 +252,11 @@ skConstructDevice(SkHostApi hostApi, size_t deviceSize, SkBool32 isPhysical, SkD
   return SK_SUCCESS;
 }
 
-SKAPI_ATTR SkResult SKAPI_CALL
-skConstructComponent(SkDevice device, size_t componentSize, SkComponent *pComponent) {
+SKAPI_ATTR SkResult SKAPI_CALL skCreateComponent(
+  SkDevice                              device,
+  size_t                                componentSize,
+  SkComponent*                          pComponent
+) {
   SkResult result;
   SkComponent component;
 
@@ -293,12 +286,11 @@ skConstructComponent(SkDevice device, size_t componentSize, SkComponent *pCompon
   return SK_SUCCESS;
 }
 
-SKAPI_ATTR SkResult SKAPI_CALL skConstructStream(
-  SkComponent                   component,
-  size_t                        streamSize,
-  SkStream*                     pStream
+SKAPI_ATTR SkResult SKAPI_CALL skCreateStream(
+  SkComponent                           component,
+  size_t                                streamSize,
+  SkStream*                             pStream
 ) {
-  SkResult result;
   SkStream stream;
 
   // Allocate the device
@@ -323,9 +315,9 @@ SKAPI_ATTR SkResult SKAPI_CALL skConstructStream(
 }
 
 SKAPI_ATTR SkBool32 SKAPI_CALL skEnumerateFormats(
-  SkFormat                      seed,
-  SkFormat*                     pIterator,
-  SkFormat*                     pValue
+  SkFormat                              seed,
+  SkFormat*                             pIterator,
+  SkFormat*                             pValue
 ) {
   SkFormat state;
 
@@ -451,19 +443,45 @@ SKAPI_ATTR SkBool32 SKAPI_CALL skEnumerateFormats(
   return SK_FALSE;
 }
 
+static void
+skSearchDeviceListIMPL(
+  char const*                           path,
+  SkDevice                              device,
+  SkObject*                             result
+) {
+  SkComponent  component;
+  while (device) {
+    if (skPathCompareIMPL(device->properties.identifier, path)) {
+      (*result) = (SkObject)device;
+      break;
+    }
+    component = device->pComponents;
+    while (component) {
+      if (skPathCompareIMPL(component->properties.identifier, path)) {
+        break;
+      }
+      component = component->pNext;
+    }
+    if (component) {
+      (*result) = (SkObject)component;
+      break;
+    }
+    device = device->pNext;
+  }
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // Public API
 ////////////////////////////////////////////////////////////////////////////////
 SKAPI_ATTR SkResult SKAPI_CALL skCreateInstance(
-  const SkInstanceCreateInfo*       pCreateInfo,
-  const SkAllocationCallbacks*      pAllocator,
-  SkInstance*                       pInstance
+  SkAllocationCallbacks const*          pAllocator,
+  SkInstanceCreateInfo const*           pCreateInfo,
+  SkInstance*                           pInstance
 ) {
   SkResult result = SK_SUCCESS;
   SkResult opResult;
   SkHostApi hostApi;
   const PFN_skProcedure* hostApiProcedure;
-  if (!pAllocator) pAllocator = &SkDefaultAllocationCallbacks;
 
   // Allocate all of the required fields of SkInstance_T
   SkInstance instance = SKALLOC(pAllocator, sizeof(SkInstance_T), SK_SYSTEM_ALLOCATION_SCOPE_INSTANCE);
@@ -494,7 +512,7 @@ SKAPI_ATTR SkResult SKAPI_CALL skCreateInstance(
 }
 
 SKAPI_ATTR void SKAPI_CALL skDestroyInstance(
-  SkInstance                        instance
+  SkInstance                            instance
 ) {
   SkHostApi hostApi;
   SkHostApi nextHostApi;
@@ -512,34 +530,11 @@ SKAPI_ATTR void SKAPI_CALL skDestroyInstance(
   SKFREE(instance->pAllocator, instance);
 }
 
-static void
-searchDeviceList(char const* path, SkDevice device, SkObject *result) {
-  SkComponent  component;
-  while (device) {
-    if (pathcmp(device->properties.identifier, path)) {
-      (*result) = (SkObject)device;
-      break;
-    }
-    component = device->pComponents;
-    while (component) {
-      if (pathcmp(component->properties.identifier, path)) {
-        break;
-      }
-      component = component->pNext;
-    }
-    if (component) {
-      (*result) = (SkObject)component;
-      break;
-    }
-    device = device->pNext;
-  }
-}
-
 #define ADVANCE(n) ((path[n] == '/') ? &path[n + 1] : &path[n])
 #define CHECK_END() (*path == '\0')
 SKAPI_ATTR SkObject SKAPI_CALL skRequestObject(
-  SkInstance                        instance,
-  char const*                       path
+  SkInstance                            instance,
+  char const*                           path
 ) {
   SkResult result;
   SkHostApi hostApi;
@@ -560,7 +555,7 @@ SKAPI_ATTR SkObject SKAPI_CALL skRequestObject(
   hostApi = instance->hostApi;
   while (hostApi) {
     skGetHostApiProperties(hostApi, &properties);
-    if (pathcmp(properties.identifier, path)) {
+    if (skPathCompareIMPL(properties.identifier, path)) {
       break;
     }
     hostApi = hostApi->pNext;
@@ -585,7 +580,7 @@ SKAPI_ATTR SkObject SKAPI_CALL skRequestObject(
 
   // Check for physical devices and components
   deviceOrComponent = NULL;
-  searchDeviceList(path, hostApi->pDevices, &deviceOrComponent);
+  skSearchDeviceListIMPL(path, hostApi->pDevices, &deviceOrComponent);
   if (deviceOrComponent != SK_NULL_HANDLE) {
     return deviceOrComponent;
   }
@@ -597,15 +592,15 @@ SKAPI_ATTR SkObject SKAPI_CALL skRequestObject(
 #undef ADVANCE
 
 SKAPI_ATTR SkObjectType SKAPI_CALL skGetObjectType(
-  SkObject                          object
+  SkObject                              object
 ) {
   return *((SkObjectType*)object);
 }
 
 SKAPI_ATTR SkResult SKAPI_CALL skEnumerateHostApi(
-  SkInstance                        instance,
-  uint32_t*                         pHostApiCount,
-  SkHostApi*                        pHostApi
+  SkInstance                            instance,
+  uint32_t*                             pHostApiCount,
+  SkHostApi*                            pHostApi
 ) {
   uint32_t count = 0;
   SkHostApi hostApi = instance->hostApi;
@@ -623,14 +618,14 @@ SKAPI_ATTR SkResult SKAPI_CALL skEnumerateHostApi(
 }
 
 SKAPI_ATTR void SKAPI_CALL skGetHostApiProperties(
-  SkHostApi                         hostApi,
-  SkHostApiProperties*              pProperties
+  SkHostApi                             hostApi,
+  SkHostApiProperties*                  pProperties
 ) {
   *pProperties = hostApi->properties;
 }
 
 SKAPI_ATTR SkResult SKAPI_CALL skScanDevices(
-  SkHostApi                         hostApi
+  SkHostApi                             hostApi
 ) {
   uint32_t physicalDevices;
   uint32_t physicalComponents;
@@ -683,10 +678,10 @@ SKAPI_ATTR SkResult SKAPI_CALL skScanDevices(
 
 static SkResult
 enumerateDeviceList(
-  SkDevice                          device,
-  SkBool32                          isPhysical,
-  uint32_t*                         pDeviceCount,
-  SkDevice*                         pDevices
+  SkDevice                              device,
+  SkBool32                              isPhysical,
+  uint32_t*                             pDeviceCount,
+  SkDevice*                             pDevices
 ) {
   uint32_t count = 0;
 
@@ -709,40 +704,40 @@ enumerateDeviceList(
 }
 
 SKAPI_ATTR SkResult SKAPI_CALL skEnumeratePhysicalDevices(
-  SkHostApi                         hostApi,
-  uint32_t*                         pPhysicalDeviceCount,
-  SkDevice*                         pPhysicalDevices
+  SkHostApi                             hostApi,
+  uint32_t*                             pPhysicalDeviceCount,
+  SkDevice*                             pPhysicalDevices
 ) {
   return enumerateDeviceList(hostApi->pDevices, SK_TRUE, pPhysicalDeviceCount, pPhysicalDevices);
 }
 
 SKAPI_ATTR SkResult SKAPI_CALL skEnumerateVirtualDevices(
-  SkHostApi                         hostApi,
-  uint32_t*                         pVirtualDeviceCount,
-  SkDevice*                         pVirtualDevices
+  SkHostApi                             hostApi,
+  uint32_t*                             pVirtualDeviceCount,
+  SkDevice*                             pVirtualDevices
 ) {
   return enumerateDeviceList(hostApi->pDevices, SK_FALSE, pVirtualDeviceCount, pVirtualDevices);
 }
 
 SKAPI_ATTR SkResult SKAPI_CALL skEnumerateDevices(
-  SkHostApi                         hostApi,
-  uint32_t*                         pDeviceCount,
-  SkDevice*                         pDevices
+  SkHostApi                             hostApi,
+  uint32_t*                             pDeviceCount,
+  SkDevice*                             pDevices
 ) {
   return enumerateDeviceList(hostApi->pDevices, SK_UNKNOWN, pDeviceCount, pDevices);
 }
 
 SKAPI_ATTR void SKAPI_CALL skGetDeviceProperties(
-  SkDevice                          device,
-  SkDeviceProperties*               pProperties
+  SkDevice                              device,
+  SkDeviceProperties*                   pProperties
 ) {
   *pProperties = device->properties;
 }
 
 SKAPI_ATTR SkResult SKAPI_CALL skEnumerateComponents(
-  SkDevice                          device,
-  uint32_t*                         pComponentCount,
-  SkComponent *                     pComponents
+  SkDevice                              device,
+  uint32_t*                             pComponentCount,
+  SkComponent *                         pComponents
 ) {
   uint32_t count = 0;
   SkComponent component;
@@ -765,40 +760,39 @@ SKAPI_ATTR SkResult SKAPI_CALL skEnumerateComponents(
 }
 
 SKAPI_ATTR void SKAPI_CALL skGetComponentProperties(
-  SkComponent                       component,
-  SkComponentProperties*            pProperties
+  SkComponent                           component,
+  SkComponentProperties*                pProperties
 ) {
   *pProperties = component->properties;
 }
 
-
 SKAPI_ATTR SkResult SKAPI_CALL skGetComponentLimits(
-  SkComponent                       component,
-  SkStreamType                      streamType,
-  SkComponentLimits*                pLimits
+  SkComponent                           component,
+  SkStreamType                          streamType,
+  SkComponentLimits*                    pLimits
 ) {
   void* params[] = { component, &streamType, pLimits };
   return component->proc(SK_PROC_COMPONENT_GET_LIMITS, params);
 }
 
 SKAPI_ATTR SkResult SKAPI_CALL skRequestStream(
-  SkComponent                       component,
-  SkStreamInfo*                     pStreamRequest,
-  SkStream*                         pStream
+  SkComponent                           component,
+  SkStreamInfo*                         pStreamRequest,
+  SkStream*                             pStream
 ) {
   void* params[] = { component, pStreamRequest, pStream };
   return component->proc(SK_PROC_STREAM_REQUEST, params);
 }
 
 SKAPI_ATTR void SKAPI_CALL skGetStreamInfo(
-  SkStream                          stream,
-  SkStreamInfo*                     pStreamInfo
+  SkStream                              stream,
+  SkStreamInfo*                         pStreamInfo
 ) {
   *pStreamInfo = stream->streamInfo;
 }
 
 SKAPI_ATTR void* SKAPI_CALL skGetStreamHandle(
-  SkStream                          stream
+  SkStream                              stream
 ) {
   SkResult result;
   void* params[] = { stream, NULL };
@@ -807,44 +801,44 @@ SKAPI_ATTR void* SKAPI_CALL skGetStreamHandle(
 }
 
 SKAPI_ATTR int64_t SKAPI_CALL skStreamWriteInterleaved(
-  SkStream                          stream,
-  void const*                       pBuffer,
-  uint32_t                          samples
+  SkStream                              stream,
+  void const*                           pBuffer,
+  uint32_t                              samples
 ) {
   SKASSERT(stream->streamInfo.streamType == SK_STREAM_TYPE_PCM_PLAYBACK, "Attempted to write to a non-write or non-PCM stream.");
   return stream->pcmFunctions.SkStreamWriteInterleaved(stream, pBuffer, samples);
 }
 
 SKAPI_ATTR int64_t SKAPI_CALL skStreamWriteNoninterleaved(
-  SkStream                          stream,
-  void const* const*                pBuffer,
-  uint32_t                          samples
+  SkStream                              stream,
+  void const* const*                    pBuffer,
+  uint32_t                              samples
 ) {
   SKASSERT(stream->streamInfo.streamType == SK_STREAM_TYPE_PCM_PLAYBACK, "Attempted to write to a non-write or non-PCM stream.");
   return stream->pcmFunctions.SkStreamWriteNoninterleaved(stream, pBuffer, samples);
 }
 
 SKAPI_ATTR int64_t SKAPI_CALL skStreamReadInterleaved(
-  SkStream                          stream,
-  void*                             pBuffer,
-  uint32_t                          samples
+  SkStream                              stream,
+  void*                                 pBuffer,
+  uint32_t                              samples
 ) {
   SKASSERT(stream->streamInfo.streamType == SK_STREAM_TYPE_PCM_CAPTURE, "Attempted to read from a non-read or non-PCM stream.");
   return stream->pcmFunctions.SkStreamReadInterleaved(stream, pBuffer, samples);
 }
 
 SKAPI_ATTR int64_t SKAPI_CALL skStreamReadNoninterleaved(
-  SkStream                          stream,
-  void**                            pBuffer,
-  uint32_t                          samples
+  SkStream                              stream,
+  void**                                pBuffer,
+  uint32_t                              samples
 ) {
   SKASSERT(stream->streamInfo.streamType == SK_STREAM_TYPE_PCM_CAPTURE, "Attempted to read from a non-read or non-PCM stream.");
   return stream->pcmFunctions.SkStreamReadNoninterleaved(stream, pBuffer, samples);
 }
 
 SKAPI_ATTR void SKAPI_CALL skDestroyStream(
-  SkStream                          stream,
-  SkBool32                          drain
+  SkStream                              stream,
+  SkBool32                              drain
 ) {
   void* params[] = { stream, &drain };
   stream->proc(SK_PROC_STREAM_DESTROY, params);
@@ -854,9 +848,9 @@ SKAPI_ATTR void SKAPI_CALL skDestroyStream(
 ////////////////////////////////////////////////////////////////////////////////
 
 SKAPI_ATTR SkTimeQuantum SKAPI_CALL skTimeQuantumConvert(
-  SkTimeQuantum                     timeQuantum,
-  SkTimeUnits                       fromTimeUnits,
-  SkTimeUnits                       toTimeUnits
+  SkTimeQuantum                         timeQuantum,
+  SkTimeUnits                           fromTimeUnits,
+  SkTimeUnits                           toTimeUnits
 ) {
   int magnitudeDifference = fromTimeUnits - toTimeUnits;
   switch (magnitudeDifference) {
@@ -896,32 +890,32 @@ SKAPI_ATTR SkTimeQuantum SKAPI_CALL skTimeQuantumConvert(
 }
 
 SKAPI_ATTR void SKAPI_CALL skTimePeriodClear(
-  SkTimePeriod                      timePeriod
+  SkTimePeriod                          timePeriod
 ) {
   timePeriod[SK_TIME_PERIOD_HI] = timePeriod[SK_TIME_PERIOD_LO] = 0;
 }
 
 SKAPI_ATTR void SKAPI_CALL skTimePeriodSet(
-  SkTimePeriod                      result,
-  SkTimePeriod                      original
+  SkTimePeriod                          result,
+  SkTimePeriod                          original
 ) {
   result[SK_TIME_PERIOD_LO] = original[SK_TIME_PERIOD_LO];
   result[SK_TIME_PERIOD_HI] = original[SK_TIME_PERIOD_HI];
 }
 
 SKAPI_ATTR void SKAPI_CALL skTimePeriodSetQuantum(
-  SkTimePeriod                      timePeriod,
-  SkTimeQuantum                     timeQuantum,
-  SkTimeUnits                       timeUnits
+  SkTimePeriod                          timePeriod,
+  SkTimeQuantum                         timeQuantum,
+  SkTimeUnits                           timeUnits
 ) {
   timePeriod[SK_TIME_PERIOD_LO] = skTimeQuantumConvert(timeQuantum, timeUnits, SK_TIME_UNITS_MIN);
   timePeriod[SK_TIME_PERIOD_HI] = skTimeQuantumConvert(timeQuantum, timeUnits, SK_TIME_UNITS_SECONDS);
 }
 
 SKAPI_ATTR void SKAPI_CALL skTimePeriodAdd(
-  SkTimePeriod                      resultTimePeriod,
-  SkTimePeriod                      leftTimePeriod,
-  SkTimePeriod                      rightTimePeriod
+  SkTimePeriod                          resultTimePeriod,
+  SkTimePeriod                          leftTimePeriod,
+  SkTimePeriod                          rightTimePeriod
 ) {
   resultTimePeriod[SK_TIME_PERIOD_LO] = leftTimePeriod[SK_TIME_PERIOD_LO] + rightTimePeriod[SK_TIME_PERIOD_LO];
   resultTimePeriod[SK_TIME_PERIOD_HI] = leftTimePeriod[SK_TIME_PERIOD_HI] + rightTimePeriod[SK_TIME_PERIOD_HI] + (resultTimePeriod[SK_TIME_PERIOD_LO] / SK_TIME_QUANTUM_MAX);
@@ -930,10 +924,10 @@ SKAPI_ATTR void SKAPI_CALL skTimePeriodAdd(
 
 
 SKAPI_ATTR void SKAPI_CALL skTimePeriodScaleAdd(
-  SkTimePeriod                      resultTimePeriod,
-  SkTimeQuantum                     leftScalar,
-  SkTimePeriod                      leftTimePeriod,
-  SkTimePeriod                      rightTimePeriod
+  SkTimePeriod                          resultTimePeriod,
+  SkTimeQuantum                         leftScalar,
+  SkTimePeriod                          leftTimePeriod,
+  SkTimePeriod                          rightTimePeriod
 ) {
   resultTimePeriod[SK_TIME_PERIOD_LO] = leftScalar * leftTimePeriod[SK_TIME_PERIOD_LO] + rightTimePeriod[SK_TIME_PERIOD_LO];
   resultTimePeriod[SK_TIME_PERIOD_HI] = leftScalar * leftTimePeriod[SK_TIME_PERIOD_HI] + rightTimePeriod[SK_TIME_PERIOD_HI] + (resultTimePeriod[SK_TIME_PERIOD_LO] / SK_TIME_QUANTUM_MOD);
@@ -941,9 +935,9 @@ SKAPI_ATTR void SKAPI_CALL skTimePeriodScaleAdd(
 }
 
 SKAPI_ATTR void SKAPI_CALL skTimePeriodSubtract(
-  SkTimePeriod                      resultTimePeriod,
-  SkTimePeriod                      leftTimePeriod,
-  SkTimePeriod                      rightTimePeriod
+  SkTimePeriod                          resultTimePeriod,
+  SkTimePeriod                          leftTimePeriod,
+  SkTimePeriod                          rightTimePeriod
 ) {
   resultTimePeriod[SK_TIME_PERIOD_LO] = leftTimePeriod[SK_TIME_PERIOD_LO] - rightTimePeriod[SK_TIME_PERIOD_LO] + SK_TIME_QUANTUM_MOD;
   resultTimePeriod[SK_TIME_PERIOD_HI] = leftTimePeriod[SK_TIME_PERIOD_HI] - rightTimePeriod[SK_TIME_PERIOD_HI] - 1 + (resultTimePeriod[SK_TIME_PERIOD_LO] / SK_TIME_QUANTUM_MOD);
@@ -951,8 +945,8 @@ SKAPI_ATTR void SKAPI_CALL skTimePeriodSubtract(
 }
 
 SKAPI_ATTR SkBool32 SKAPI_CALL skTimePeriodLess(
-  SkTimePeriod                      leftTimePeriod,
-  SkTimePeriod                      rightTimePeriod
+  SkTimePeriod                          leftTimePeriod,
+  SkTimePeriod                          rightTimePeriod
 ) {
   if (leftTimePeriod[SK_TIME_PERIOD_HI] == rightTimePeriod[SK_TIME_PERIOD_HI]) {
     return (leftTimePeriod[SK_TIME_PERIOD_LO] < rightTimePeriod[SK_TIME_PERIOD_LO]);
@@ -961,8 +955,8 @@ SKAPI_ATTR SkBool32 SKAPI_CALL skTimePeriodLess(
 }
 
 SKAPI_ATTR SkBool32 SKAPI_CALL skTimePeriodLessEqual(
-  SkTimePeriod                      leftTimePeriod,
-  SkTimePeriod                      rightTimePeriod
+  SkTimePeriod                          leftTimePeriod,
+  SkTimePeriod                          rightTimePeriod
 ) {
   if (leftTimePeriod[SK_TIME_PERIOD_HI] == rightTimePeriod[SK_TIME_PERIOD_HI]) {
     return (leftTimePeriod[SK_TIME_PERIOD_LO] <= rightTimePeriod[SK_TIME_PERIOD_LO]);
@@ -971,14 +965,14 @@ SKAPI_ATTR SkBool32 SKAPI_CALL skTimePeriodLessEqual(
 }
 
 SKAPI_ATTR SkBool32 SKAPI_CALL skTimePeriodIsZero(
-  SkTimePeriod                      timePeriod
+  SkTimePeriod                          timePeriod
 ) {
   return (timePeriod[SK_TIME_PERIOD_LO] == 0 && timePeriod[SK_TIME_PERIOD_HI] == 0);
 }
 
 SKAPI_ATTR float SKAPI_CALL skTimePeriodToFloat(
-  SkTimePeriod                      timePeriod,
-  SkTimeUnits                       timeUnits
+  SkTimePeriod                          timePeriod,
+  SkTimeUnits                           timeUnits
 ) {
   float amountInSeconds = timePeriod[SK_TIME_PERIOD_HI] + ((float)timePeriod[SK_TIME_PERIOD_LO] / SK_TIME_QUANTUM_MAX);
   switch ((int)(SK_TIME_UNITS_SECONDS - timeUnits)) {
@@ -1032,8 +1026,8 @@ SKAPI_ATTR float SKAPI_CALL skTimePeriodToFloat(
 }
 
 SKAPI_ATTR SkTimeQuantum SKAPI_CALL skTimePeriodToQuantum(
-  SkTimePeriod                      timePeriod,
-  SkTimeUnits                       timeUnits
+  SkTimePeriod                          timePeriod,
+  SkTimeUnits                           timeUnits
 ) {
   return skTimeQuantumConvert(timePeriod[SK_TIME_PERIOD_LO], SK_TIME_UNITS_MIN, timeUnits) +
          skTimeQuantumConvert(timePeriod[SK_TIME_PERIOD_HI], SK_TIME_UNITS_SECONDS, timeUnits);
@@ -1043,8 +1037,31 @@ SKAPI_ATTR SkTimeQuantum SKAPI_CALL skTimePeriodToQuantum(
 // Stringize Functions
 ////////////////////////////////////////////////////////////////////////////////
 #define PRINT_CASE(e) case e: return #e
+SKAPI_ATTR char const* SKAPI_CALL skGetResultString(
+  SkResult                              result
+) {
+  switch (result) {
+    PRINT_CASE(SK_SUCCESS);
+    PRINT_CASE(SK_INCOMPLETE);
+    PRINT_CASE(SK_ERROR_UNKNOWN);
+    PRINT_CASE(SK_ERROR_OUT_OF_HOST_MEMORY);
+    PRINT_CASE(SK_ERROR_INITIALIZATION_FAILED);
+    PRINT_CASE(SK_ERROR_NOT_IMPLEMENTED);
+    PRINT_CASE(SK_ERROR_NOT_FOUND);
+    PRINT_CASE(SK_ERROR_INVALID);
+    PRINT_CASE(SK_ERROR_DEVICE_QUERY_FAILED);
+    PRINT_CASE(SK_ERROR_STREAM_NOT_READY);
+    PRINT_CASE(SK_ERROR_STREAM_BUSY);
+    PRINT_CASE(SK_ERROR_STREAM_XRUN);
+    PRINT_CASE(SK_ERROR_STREAM_INVALID);
+    PRINT_CASE(SK_ERROR_STREAM_LOST);
+    PRINT_CASE(SK_ERROR_STREAM_REQUEST_FAILED);
+  }
+  return NULL;
+}
+
 SKAPI_ATTR char const* SKAPI_CALL skGetObjectTypeString(
-  SkObjectType                      objectType
+  SkObjectType                          objectType
 ) {
   switch (objectType) {
     PRINT_CASE(SK_OBJECT_TYPE_INVALID);
@@ -1058,7 +1075,7 @@ SKAPI_ATTR char const* SKAPI_CALL skGetObjectTypeString(
 }
 
 SKAPI_ATTR char const* SKAPI_CALL skGetStreamTypeString(
-  SkStreamType                      streamType
+  SkStreamType                          streamType
 ) {
   switch (streamType) {
     PRINT_CASE(SK_STREAM_TYPE_NONE);
@@ -1069,7 +1086,7 @@ SKAPI_ATTR char const* SKAPI_CALL skGetStreamTypeString(
 }
 
 SKAPI_ATTR char const* SKAPI_CALL skGetStreamFlagString(
-  SkStreamFlags                     streamFlag
+  SkStreamFlags                         streamFlag
 ) {
   switch (streamFlag) {
     PRINT_CASE(SK_STREAM_FLAGS_NONE);
@@ -1080,7 +1097,7 @@ SKAPI_ATTR char const* SKAPI_CALL skGetStreamFlagString(
 }
 
 SKAPI_ATTR char const* SKAPI_CALL skGetAccessModeString(
-  SkAccessMode                      accessMode
+  SkAccessMode                          accessMode
 ) {
   switch (accessMode) {
     PRINT_CASE(SK_ACCESS_MODE_BLOCK);
@@ -1090,7 +1107,7 @@ SKAPI_ATTR char const* SKAPI_CALL skGetAccessModeString(
 }
 
 SKAPI_ATTR char const* SKAPI_CALL skGetAccessTypeString(
-  SkAccessType                      accessType
+  SkAccessType                          accessType
 ) {
   switch (accessType) {
     PRINT_CASE(SK_ACCESS_TYPE_ANY);
@@ -1104,7 +1121,7 @@ SKAPI_ATTR char const* SKAPI_CALL skGetAccessTypeString(
 }
 
 SKAPI_ATTR char const* SKAPI_CALL skGetFormatString(
-  SkFormat                          format
+  SkFormat                              format
 ) {
   switch (format) {
     PRINT_CASE(SK_FORMAT_INVALID);
@@ -1146,7 +1163,7 @@ SKAPI_ATTR char const* SKAPI_CALL skGetFormatString(
 }
 
 SKAPI_ATTR SkFormat SKAPI_CALL skGetFormatStatic(
-  SkFormat                          format
+  SkFormat                              format
 ) {
   switch (format) {
     case SK_FORMAT_S16:
@@ -1171,7 +1188,7 @@ SKAPI_ATTR SkFormat SKAPI_CALL skGetFormatStatic(
 }
 
 SKAPI_ATTR char const* SKAPI_CALL skGetTimeUnitsString(
-  SkTimeUnits                       timeUnits
+  SkTimeUnits                           timeUnits
 ) {
   switch (timeUnits) {
     PRINT_CASE(SK_TIME_UNITS_UNKNOWN);
@@ -1204,7 +1221,7 @@ SKAPI_ATTR char const* SKAPI_CALL skGetTimeUnitsString(
 }
 
 SKAPI_ATTR char const* SKAPI_CALL skGetTimeUnitsSymbolString(
-  SkTimeUnits                       timeUnits
+  SkTimeUnits                           timeUnits
 ) {
   switch (timeUnits) {
     case SK_TIME_UNITS_UNKNOWN:

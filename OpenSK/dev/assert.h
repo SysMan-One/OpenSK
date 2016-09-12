@@ -6,11 +6,23 @@
 #ifndef   OPENSK_DEV_ASSERT_H
 #define   OPENSK_DEV_ASSERT_H 1
 
+// C99
 #include <stdio.h> // fprintf
 
-#define SKWARN(...) fputs(__FUNCTION__, stderr); fprintf(stderr, ": " __VA_ARGS__)
-#define SKERROR(...) SKWARN(__VA_ARGS__); abort()
-#define SKWARNIF(check, ...) do { if (check) { SKWARN(__VA_ARGS__); } } while (0)
-#define SKASSERT(check, ...) do { if (!(check)) { SKERROR(__VA_ARGS__); } } while (0)
+#define SKNOTE(...)     fprintf(stderr, "INFO: " __VA_ARGS__)
+#define SKWARN(...)     fprintf(stderr, "WARN: " __VA_ARGS__)
+#define SKERROR(...)    do { SKWARN(__VA_ARGS__); abort(); } while (0)
+#define SKWARNIF(check, ...)                                                  \
+do {                                                                          \
+  if (check) {                                                                \
+    SKWARN(__VA_ARGS__);                                                      \
+  }                                                                           \
+} while (0)
+#define SKASSERT(check, ...)                                                  \
+do {                                                                          \
+  if (!(check)) {                                                             \
+    SKERROR(__VA_ARGS__);                                                     \
+  }                                                                           \
+} while (0)
 
 #endif // OPENSK_DEV_ASSERT_H

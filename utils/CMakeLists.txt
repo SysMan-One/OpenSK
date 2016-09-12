@@ -8,11 +8,11 @@
 find_library(M_LIB m)
 
 add_executable(skls skls/main.c)
-target_link_libraries(skls sk skx)
+target_link_libraries(skls sk skx sku)
 configure_file(skls/SKCOLORS SKCOLORS COPYONLY)
 
 add_executable(skdd skdd/main.c)
-target_link_libraries(skdd sk skx)
+target_link_libraries(skdd sk skx sku)
 
 install(
   TARGETS skls skdd

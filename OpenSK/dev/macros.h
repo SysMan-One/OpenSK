@@ -6,9 +6,12 @@
 #ifndef   OPENSK_DEV_MACROS_H
 #define   OPENSK_DEV_MACROS_H 1
 
-#define SKALLOC(in, size, scope) in->pfnAllocation(in->pUserData, size, 0, scope)
-#define SKFREE(in, ptr) in->pfnFree(in->pUserData, ptr)
+#include <stdlib.h>
+
+#define SKALLOC(in, size, scope) (in) ? in->pfnAllocation(in->pUserData, size, 0, scope) : malloc(size)
+#define SKFREE(in, ptr) if (in) { in->pfnFree(in->pUserData, ptr); } else { free(ptr); }
 #define SKMIN(a, b) (((a) < (b)) ? (a) : (b))
 #define SKMAX(a, b) (((a) > (b)) ? (a) : (b))
+#define SKISNUM(a) (((a) >= '0') && ((a) <= '9'))
 
 #endif // OPENSK_DEV_MACROS_H

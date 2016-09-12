@@ -6,7 +6,8 @@
 #ifndef OPENSK_H
 #define OPENSK_H 1
 
-#include "opensk_platform.h"
+// OpenSK
+#include <OpenSK/opensk_platform.h>
 
 #ifdef    __cplusplus
 extern "C" {
@@ -17,7 +18,7 @@ extern "C" {
 ////////////////////////////////////////////////////////////////////////////////
 
 #define SK_MAKE_VERSION(major, minor, patch) (((major) << 22) | ((minor) << 12) | (patch))
-#define SK_DEFINE_HANDLE(object) typedef struct object##_T* object;
+#define SK_DEFINE_HANDLE(object) typedef struct object##_T* object
 #define SK_API_VERSION_0_0 SK_MAKE_VERSION(0, 0, 0)
 
 #define SK_VERSION_MAJOR(version) ((uint32_t)(version) >> 22)
@@ -25,12 +26,12 @@ extern "C" {
 #define SK_VERSION_PATCH(version) ((uint32_t)(version) & 0xfff)
 #define SK_NULL_HANDLE 0
 
-SK_DEFINE_HANDLE(SkObject)
-SK_DEFINE_HANDLE(SkInstance)
-SK_DEFINE_HANDLE(SkHostApi)
-SK_DEFINE_HANDLE(SkDevice)
-SK_DEFINE_HANDLE(SkComponent)
-SK_DEFINE_HANDLE(SkStream)
+SK_DEFINE_HANDLE(SkObject);
+SK_DEFINE_HANDLE(SkInstance);
+SK_DEFINE_HANDLE(SkHostApi);
+SK_DEFINE_HANDLE(SkDevice);
+SK_DEFINE_HANDLE(SkComponent);
+SK_DEFINE_HANDLE(SkStream);
 
 typedef int32_t SkBool32;
 typedef uint32_t SkFlags;
@@ -55,7 +56,7 @@ typedef uint32_t SkFlags;
 #define SK_MAX_SERIAL_NAME_SIZE 256
 
 ////////////////////////////////////////////////////////////////////////////////
-// Standard Types
+// Standard Enumerations
 ////////////////////////////////////////////////////////////////////////////////
 typedef enum SkObjectType {
   SK_OBJECT_TYPE_INVALID = 0,
@@ -78,6 +79,8 @@ typedef enum SkResult {
   SK_ERROR_OUT_OF_HOST_MEMORY,
   SK_ERROR_INITIALIZATION_FAILED,
   SK_ERROR_NOT_IMPLEMENTED,
+  SK_ERROR_NOT_FOUND,
+  SK_ERROR_INVALID,
   // Device Results
   SK_ERROR_DEVICE_QUERY_FAILED,
   // Stream Results
@@ -94,7 +97,8 @@ typedef enum SkAllocationScope {
   SK_SYSTEM_ALLOCATION_SCOPE_HOST_API,
   SK_SYSTEM_ALLOCATION_SCOPE_DEVICE,
   SK_SYSTEM_ALLOCATION_SCOPE_STREAM,
-  SK_SYSTEM_ALLOCATION_SCOPE_EXTENSION
+  SK_SYSTEM_ALLOCATION_SCOPE_EXTENSION,
+  SK_SYSTEM_ALLOCATION_SCOPE_UTILITY
 } SkAllocationScope;
 
 typedef enum SkHostCapabilities {
@@ -103,13 +107,6 @@ typedef enum SkHostCapabilities {
   SK_HOST_CAPABILITIES_SEQUENCER = 1<<2,
   SK_HOST_CAPABILITIES_VIDEO = 1<<3
 } SkHostCapabilities;
-
-typedef enum SkRangeDirection {
-  SK_RANGE_DIRECTION_UNKNOWN,
-  SK_RANGE_DIRECTION_LESS,
-  SK_RANGE_DIRECTION_EQUAL,
-  SK_RANGE_DIRECTION_GREATER
-} SkRangeDirection;
 
 typedef enum SkStreamType {
   SK_STREAM_TYPE_NONE = 0,
@@ -126,7 +123,7 @@ typedef enum SkAccessType {
   SK_ACCESS_TYPE_ANY,
   SK_ACCESS_TYPE_INTERLEAVED,
   SK_ACCESS_TYPE_NONINTERLEAVED,
-  SK_ACCESS_TYPE_MMAP_INTERLEAVED,
+  SK_ACCESS_TYPE_MMAP_INTERLEAVED, // TODO: Remove MMAP, turn it into a property.
   SK_ACCESS_TYPE_MMAP_NONINTERLEAVED,
   SK_ACCESS_TYPE_MMAP_COMPLEX
 } SkAccessType;
@@ -220,28 +217,6 @@ typedef enum SkTimeUnits {
   SK_TIME_UNITS_YOTTASECONDS
 } SkTimeUnits;
 
-#if defined(UINT64_MAX)
-typedef uint64_t SkTimeQuantum;
-#define SK_TIME_UNITS_MIN SK_TIME_UNITS_ATTOSECONDS
-#define SK_TIME_UNITS_MAX SK_TIME_UNITS_PETASECONDS
-#define SK_TIME_QUANTUM_MOD 1000000000000000000u
-#define SK_TIME_QUANTUM_MAX (SK_TIME_QUANTUM_MOD-1)
-#define SK_TIME_QUANTUM_BITS 64
-#elif defined(UINT32_MAX)
-typedef uint32_t SkTimeQuantum;
-#define SK_TIME_UNITS_MIN SK_TIME_UNITS_NANOSECONDS
-#define SK_TIME_UNITS_MAX SK_TIME_UNITS_MEGASECONDS
-#define SK_TIME_QUANTUM_MOD 1000000000u
-#define SK_TIME_QUANTUM_MAX (SK_TIME_QUANTUM_MOD-1)
-#define SK_TIME_QUANTUM_BITS 32
-#else
-# error "Unsupported machine configuration - must at least support 32-bit numbers!"
-#endif
-#define SK_TIME_PERIOD_HI 1
-#define SK_TIME_PERIOD_LO 0
-
-typedef SkTimeQuantum SkTimePeriod[2];
-
 typedef enum SkTransportType {
   SK_TRANSPORT_TYPE_UNKNOWN,
   SK_TRANSPORT_TYPE_UNDEFINED,
@@ -265,253 +240,276 @@ typedef enum SkFormFactor {
   SK_FORM_FACTOR_TELEVISION
 } SkFormFactor;
 
+////////////////////////////////////////////////////////////////////////////////
+// Standard Function Pointers
+////////////////////////////////////////////////////////////////////////////////
+
 typedef void* (SKAPI_PTR *PFN_skAllocationFunction)(
-  void*                             pUserData,
-  size_t                            size,
-  size_t                            alignment,
+  void*                                 pUserData,
+  size_t                                size,
+  size_t                                alignment,
   SkAllocationScope allocationScope
 );
 
 typedef void* (SKAPI_PTR *PFN_skFreeFunction)(
-  void*                             pUserData,
-  void*                             memory
+  void*                                 pUserData,
+  void*                                 memory
 );
 
-typedef struct SkRangedValue {
-  uint32_t                          value;
-  SkRangeDirection                  direction;
-} SkRangedValue;
+////////////////////////////////////////////////////////////////////////////////
+// Standard Structures
+////////////////////////////////////////////////////////////////////////////////
+
+#if defined(UINT64_MAX)
+typedef uint64_t SkTimeQuantum;
+#define SK_TIME_UNITS_MIN SK_TIME_UNITS_ATTOSECONDS
+#define SK_TIME_UNITS_MAX SK_TIME_UNITS_PETASECONDS
+#define SK_TIME_QUANTUM_MOD 1000000000000000000u
+#define SK_TIME_QUANTUM_MAX (SK_TIME_QUANTUM_MOD-1)
+#define SK_TIME_QUANTUM_BITS 64
+#elif defined(UINT32_MAX)
+typedef uint32_t SkTimeQuantum;
+#define SK_TIME_UNITS_MIN SK_TIME_UNITS_NANOSECONDS
+#define SK_TIME_UNITS_MAX SK_TIME_UNITS_MEGASECONDS
+#define SK_TIME_QUANTUM_MOD 1000000000u
+#define SK_TIME_QUANTUM_MAX (SK_TIME_QUANTUM_MOD-1)
+#define SK_TIME_QUANTUM_BITS 32
+#else
+# error "Unsupported machine configuration - must at least support 32-bit numbers!"
+#endif
+#define SK_TIME_PERIOD_HI 1
+#define SK_TIME_PERIOD_LO 0
+
+typedef SkTimeQuantum SkTimePeriod[2];
 
 typedef struct SkApplicationInfo {
-  const char*                       pApplicationName;
-  uint32_t                          applicationVersion;
-  const char*                       pEngineName;
-  uint32_t                          engineVersion;
-  uint32_t                          apiVersion;
+  char const*                           pApplicationName;
+  uint32_t                              applicationVersion;
+  char const*                           pEngineName;
+  uint32_t                              engineVersion;
+  uint32_t                              apiVersion;
 } SkApplicationInfo;
 
 typedef struct SkInstanceCreateInfo {
-  SkInstanceCreateFlags             flags;
-  const SkApplicationInfo*          pApplicationInfo;
-  uint32_t                          enabledExtensionCount;
-  const char* const*                ppEnabledExtensionNames;
+  SkInstanceCreateFlags                 flags;
+  SkApplicationInfo const*              pApplicationInfo;
+  uint32_t                              enabledExtensionCount;
+  char const* const*                    ppEnabledExtensionNames;
 } SkInstanceCreateInfo;
 
 typedef struct SkAllocationCallbacks {
-  void*                             pUserData;
-  PFN_skAllocationFunction          pfnAllocation;
-  PFN_skFreeFunction                pfnFree;
+  void*                                 pUserData;
+  PFN_skAllocationFunction              pfnAllocation;
+  PFN_skFreeFunction                    pfnFree;
 } SkAllocationCallbacks;
-SKAPI_ATTR SkAllocationCallbacks SkDefaultAllocationCallbacks;
 
 typedef struct SkHostApiProperties {
-  char                              identifier[SK_MAX_HOST_IDENTIFIER_SIZE];
-  char                              hostName[SK_MAX_HOST_NAME_SIZE];
-  char                              hostNameFull[SK_MAX_HOST_NAME_SIZE];
-  char                              description[SK_MAX_HOST_DESC_SIZE];
-  SkHostCapabilities                capabilities;
-  uint32_t                          physicalDevices;
-  uint32_t                          physicalComponents;
-  uint32_t                          virtualDevices;
-  uint32_t                          virtualComponents;
+  char                                  identifier[SK_MAX_HOST_IDENTIFIER_SIZE];
+  char                                  hostName[SK_MAX_HOST_NAME_SIZE];
+  char                                  hostNameFull[SK_MAX_HOST_NAME_SIZE];
+  char                                  description[SK_MAX_HOST_DESC_SIZE];
+  SkHostCapabilities                    capabilities;
+  uint32_t                              physicalDevices;
+  uint32_t                              physicalComponents;
+  uint32_t                              virtualDevices;
+  uint32_t                              virtualComponents;
 } SkHostApiProperties;
 
 typedef struct SkExtensionProperties {
-  char                              extensionName[SK_MAX_EXTENSION_NAME_SIZE];
-  uint32_t                          specVersion;
+  char                                  extensionName[SK_MAX_EXTENSION_NAME_SIZE];
+  uint32_t                              specVersion;
 } SkExtensionProperties;
-
 
 typedef struct SkDeviceProperties {
   // Device Properties
-  char                              identifier[SK_MAX_DEVICE_IDENTIFIER_SIZE];  // SK Canonical Device Identifier (ex. pda)
-  char                              deviceName[SK_MAX_DEVICE_NAME_SIZE];        // Pretty Device Name (ex. HDA Nvidia)
-  char                              driverName[SK_MAX_DRIVER_NAME_SIZE];        // Pretty Driver Name (ex. USB-Audio)
-  char                              mixerName[SK_MAX_MIXER_NAME_SIZE];          // Pretty Mixer Name (ex. USB Mixer)
-  uint32_t                          componentCount;                             // Number of components this device owns
-  SkBool32                          isPhysical;                                 // Whether or not the device (and it's components) are physical
+  char                                  identifier[SK_MAX_DEVICE_IDENTIFIER_SIZE];  // SK Canonical Device Identifier (ex. pda)
+  char                                  deviceName[SK_MAX_DEVICE_NAME_SIZE];        // Pretty Device Name (ex. HDA Nvidia)
+  char                                  driverName[SK_MAX_DRIVER_NAME_SIZE];        // Pretty Driver Name (ex. USB-Audio)
+  char                                  mixerName[SK_MAX_MIXER_NAME_SIZE];          // Pretty Mixer Name (ex. USB Mixer)
+  uint32_t                              componentCount;                             // Number of components this device owns
+  SkBool32                              isPhysical;                                 // Whether or not the device (and it's components) are physical
   // Hardware Properties
-  char                              deviceUUID[SK_UUID_SIZE];                   // The UUID for this device under this transport
-  char                              vendorUUID[SK_UUID_SIZE];                   // The UUID for the vendor
-  char                              vendorName[SK_MAX_VENDOR_NAME_SIZE];        // The name of the vendor
-  char                              modelUUID[SK_UUID_SIZE];                    // The UUID for the model
-  char                              modelName[SK_MAX_MODEL_NAME_SIZE];          // The name of the model
-  char                              serialUUID[SK_UUID_SIZE];                   // The UUID for the serial
-  char                              serialName[SK_MAX_SERIAL_NAME_SIZE];        // The name of the serial
-  SkTransportType                   transportType;                              // The transport type
-  SkFormFactor                      formFactor;                                 // The form factor
+  char                                  deviceUUID[SK_UUID_SIZE];                   // The UUID for this device under this transport
+  char                                  vendorUUID[SK_UUID_SIZE];                   // The UUID for the vendor
+  char                                  vendorName[SK_MAX_VENDOR_NAME_SIZE];        // The name of the vendor
+  char                                  modelUUID[SK_UUID_SIZE];                    // The UUID for the model
+  char                                  modelName[SK_MAX_MODEL_NAME_SIZE];          // The name of the model
+  char                                  serialUUID[SK_UUID_SIZE];                   // The UUID for the serial
+  char                                  serialName[SK_MAX_SERIAL_NAME_SIZE];        // The name of the serial
+  SkTransportType                       transportType;                              // The transport type
+  SkFormFactor                          formFactor;                                 // The form factor
 } SkDeviceProperties;
 
 typedef struct SkComponentProperties {
-  char                              identifier[SK_MAX_COMPONENT_IDENTIFIER_SIZE];
-  char                              componentName[SK_MAX_COMPONENT_NAME_SIZE];
-  char                              componentDescription[SK_MAX_COMPONENT_DESC_SIZE];
-  SkStreamTypes                     supportedStreams;
-  SkBool32                          isPhysical;
+  char                                  identifier[SK_MAX_COMPONENT_IDENTIFIER_SIZE];
+  char                                  componentName[SK_MAX_COMPONENT_NAME_SIZE];
+  char                                  componentDescription[SK_MAX_COMPONENT_DESC_SIZE];
+  SkStreamTypes                         supportedStreams;
+  SkBool32                              isPhysical;
 } SkComponentProperties;
 
 typedef struct SkComponentLimits {
-  uint32_t                          maxChannels;
-  uint32_t                          minChannels;
-  uint64_t                          maxFrameSize;
-  uint64_t                          minFrameSize;
-  SkRangedValue                     maxBufferTime;
-  SkRangedValue                     minBufferTime;
-  SkRangedValue                     maxPeriodSize;
-  SkRangedValue                     minPeriodSize;
-  SkRangedValue                     maxPeriodTime;
-  SkRangedValue                     minPeriodTime;
-  SkRangedValue                     maxPeriods;
-  SkRangedValue                     minPeriods;
-  SkRangedValue                     maxRate;
-  SkRangedValue                     minRate;
-  SkBool32                          supportedFormats[SK_FORMAT_MAX];
+  uint32_t                              maxChannels;
+  uint32_t                              minChannels;
+  uint64_t                              maxFrameSize;
+  uint64_t                              minFrameSize;
+  SkTimePeriod                          maxBufferTime;
+  SkTimePeriod                          minBufferTime;
+  uint64_t                              maxPeriodSize;
+  uint64_t                              minPeriodSize;
+  SkTimePeriod                          maxPeriodTime;
+  SkTimePeriod                          minPeriodTime;
+  uint64_t                              maxPeriods;
+  uint64_t                              minPeriods;
+  uint64_t                              maxRate;
+  uint64_t                              minRate;
+  SkBool32                              supportedFormats[SK_FORMAT_MAX];
 } SkComponentLimits;
 
 typedef struct SkPcmStreamInfo {
-  SkStreamType                      streamType;   // Should be one of the PCM stream types
-  SkAccessMode                      accessMode;   // How the stream should be accessed (block/non-block)
-  SkAccessType                      accessType;   // Configuration for reading/writing data
-  SkStreamFlags                     streamFlags;  // Configuration for misc. runtime options.
-  SkFormat                          formatType;   // The underlying type of the PCM stream
-  uint32_t                          formatBits;   // Number of bits in the format
-  uint32_t                          channels;     // Number of channels in a sample
-  uint32_t                          sampleRate;   // Number of samples per second
-  uint32_t                          sampleBits;   // Number of bits in a sample
-  SkTimePeriod                      sampleTime;   // Calculated time each sample represents
-  uint32_t                          periods;      // Number of periods
-  uint32_t                          periodSamples;// Number of samples in a period
-  uint32_t                          periodBits;   // Number of bits in a period
-  SkTimePeriod                      periodTime;   // Calculated time each period represents
-  uint32_t                          bufferSamples;// Number of samples in the back-buffer
-  uint32_t                          bufferBits;   // Number of bits in the back-buffer
-  SkTimePeriod                      bufferTime;   // Calculated time the back-buffer represents
+  SkStreamType                          streamType;   // Should be one of the PCM stream types
+  SkAccessMode                          accessMode;   // How the stream should be accessed (block/non-block)
+  SkAccessType                          accessType;   // Configuration for reading/writing data
+  SkStreamFlags                         streamFlags;  // Configuration for misc. runtime options.
+  SkFormat                              formatType;   // The underlying type of the PCM stream
+  uint32_t                              formatBits;   // Number of bits in the format
+  uint32_t                              channels;     // Number of channels in a sample
+  uint32_t                              sampleRate;   // Number of samples per second
+  uint32_t                              sampleBits;   // Number of bits in a sample
+  SkTimePeriod                          sampleTime;   // Calculated time each sample represents
+  uint32_t                              periods;      // Number of periods
+  uint32_t                              periodSamples;// Number of samples in a period
+  uint32_t                              periodBits;   // Number of bits in a period
+  SkTimePeriod                          periodTime;   // Calculated time each period represents
+  uint32_t                              bufferSamples;// Number of samples in the back-buffer
+  uint32_t                              bufferBits;   // Number of bits in the back-buffer
+  SkTimePeriod                          bufferTime;   // Calculated time the back-buffer represents
 } SkPcmStreamInfo;
 
 typedef union SkStreamInfo {
-  SkStreamType                      streamType;
-  SkPcmStreamInfo                   pcm;
+  SkStreamType                          streamType;
+  SkPcmStreamInfo                       pcm;
 } SkStreamInfo;
 
 ////////////////////////////////////////////////////////////////////////////////
 // Standard Functions
 ////////////////////////////////////////////////////////////////////////////////
 SKAPI_ATTR SkResult SKAPI_CALL skCreateInstance(
-  const SkInstanceCreateInfo*       pCreateInfo,
-  const SkAllocationCallbacks*      pAllocator,
-  SkInstance*                       pInstance
+  SkAllocationCallbacks const*          pAllocator,
+  SkInstanceCreateInfo const*           pCreateInfo,
+  SkInstance*                           pInstance
 );
 
 SKAPI_ATTR void SKAPI_CALL skDestroyInstance(
-  SkInstance                        instance
+  SkInstance                            instance
 );
 
 SKAPI_ATTR SkObject SKAPI_CALL skRequestObject(
-  SkInstance                        instance,
-  char const*                       path
+  SkInstance                            instance,
+  char const*                           path
 );
 
 SKAPI_ATTR SkObjectType SKAPI_CALL skGetObjectType(
-  SkObject                          object
+  SkObject                              object
 );
 
 SKAPI_ATTR SkResult SKAPI_CALL skEnumerateHostApi(
-  SkInstance                        instance,
-  uint32_t*                         pHostApiCount,
-  SkHostApi*                        pHostApi
+  SkInstance                            instance,
+  uint32_t*                             pHostApiCount,
+  SkHostApi*                            pHostApi
 );
 
 SKAPI_ATTR SkResult SKAPI_CALL skScanDevices(
-  SkHostApi                         hostApi
+  SkHostApi                             hostApi
 );
 
 SKAPI_ATTR void SKAPI_CALL skGetHostApiProperties(
-  SkHostApi                         hostApi,
-  SkHostApiProperties*              pProperties
+  SkHostApi                             hostApi,
+  SkHostApiProperties*                  pProperties
 );
 
 SKAPI_ATTR SkResult SKAPI_CALL skEnumeratePhysicalDevices(
-  SkHostApi                         hostApi,
-  uint32_t*                         pPhysicalDeviceCount,
-  SkDevice*                         pPhysicalDevices
+  SkHostApi                             hostApi,
+  uint32_t*                             pPhysicalDeviceCount,
+  SkDevice*                             pPhysicalDevices
 );
 
 SKAPI_ATTR SkResult SKAPI_CALL skEnumerateVirtualDevices(
-  SkHostApi                         hostApi,
-  uint32_t*                         pVirtualDeviceCount,
-  SkDevice*                         pVirtualDevices
+  SkHostApi                             hostApi,
+  uint32_t*                             pVirtualDeviceCount,
+  SkDevice*                             pVirtualDevices
 );
 
 SKAPI_ATTR SkResult SKAPI_CALL skEnumerateDevices(
-  SkHostApi                         hostApi,
-  uint32_t*                         pDeviceCount,
-  SkDevice*                         pDevices
+  SkHostApi                             hostApi,
+  uint32_t*                             pDeviceCount,
+  SkDevice*                             pDevices
 );
 
 SKAPI_ATTR void SKAPI_CALL skGetDeviceProperties(
-  SkDevice                          device,
-  SkDeviceProperties*               pProperties
+  SkDevice                              device,
+  SkDeviceProperties*                   pProperties
 );
 
 SKAPI_ATTR SkResult SKAPI_CALL skEnumerateComponents(
-  SkDevice                          device,
-  uint32_t*                         pComponentCount,
-  SkComponent*                      pComponents
+  SkDevice                              device,
+  uint32_t*                             pComponentCount,
+  SkComponent*                          pComponents
 );
 
 SKAPI_ATTR void SKAPI_CALL skGetComponentProperties(
-  SkComponent                       component,
-  SkComponentProperties*            pProperties
+  SkComponent                           component,
+  SkComponentProperties*                pProperties
 );
 
 SKAPI_ATTR SkResult SKAPI_CALL skGetComponentLimits(
-  SkComponent                       component,
-  SkStreamType                      streamType,
-  SkComponentLimits*                pLimits
+  SkComponent                           component,
+  SkStreamType                          streamType,
+  SkComponentLimits*                    pLimits
 );
 
 SKAPI_ATTR SkResult SKAPI_CALL skRequestStream(
-  SkComponent                       component,
-  SkStreamInfo*                     pStreamRequest,
-  SkStream*                         pStream
+  SkComponent                           component,
+  SkStreamInfo*                         pStreamRequest,
+  SkStream*                             pStream
 );
 
 SKAPI_ATTR void SKAPI_CALL skGetStreamInfo(
-  SkStream                          stream,
-  SkStreamInfo*                     pStreamInfo
+  SkStream                              stream,
+  SkStreamInfo*                         pStreamInfo
 );
 
 SKAPI_ATTR void* SKAPI_CALL skGetStreamHandle(
-  SkStream                          stream
+  SkStream                              stream
 );
 
 SKAPI_ATTR int64_t SKAPI_CALL skStreamWriteInterleaved(
-  SkStream                          stream,
-  void const*                       pBuffer,
-  uint32_t                          samples
+  SkStream                              stream,
+  void const*                           pBuffer,
+  uint32_t                              samples
 );
 
 SKAPI_ATTR int64_t SKAPI_CALL skStreamWriteNoninterleaved(
-  SkStream                          stream,
-  void const* const*                pBuffer,
-  uint32_t                          samples
+  SkStream                              stream,
+  void const* const*                    pBuffer,
+  uint32_t                              samples
 );
 
 SKAPI_ATTR int64_t SKAPI_CALL skStreamReadInterleaved(
-  SkStream                          stream,
-  void*                             pBuffer,
-  uint32_t                          samples
+  SkStream                              stream,
+  void*                                 pBuffer,
+  uint32_t                              samples
 );
 
 SKAPI_ATTR int64_t SKAPI_CALL skStreamReadNoninterleaved(
-  SkStream                          stream,
-  void**                            pBuffer,
-  uint32_t                          samples
+  SkStream                              stream,
+  void**                                pBuffer,
+  uint32_t                              samples
 );
 
 SKAPI_ATTR void SKAPI_CALL skDestroyStream(
-  SkStream                          stream,
-  SkBool32                          drain
+  SkStream                              stream,
+  SkBool32                              drain
 );
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -519,106 +517,110 @@ SKAPI_ATTR void SKAPI_CALL skDestroyStream(
 ////////////////////////////////////////////////////////////////////////////////
 
 SKAPI_ATTR SkTimeQuantum SKAPI_CALL skTimeQuantumConvert(
-  SkTimeQuantum                     timeQuantum,
-  SkTimeUnits                       fromTimeUnits,
-  SkTimeUnits                       toTimeUnits
+  SkTimeQuantum                         timeQuantum,
+  SkTimeUnits                           fromTimeUnits,
+  SkTimeUnits                           toTimeUnits
 );
 
 SKAPI_ATTR void SKAPI_CALL skTimePeriodClear(
-  SkTimePeriod                      timePeriod
+  SkTimePeriod                          timePeriod
 );
 
 SKAPI_ATTR void SKAPI_CALL skTimePeriodSet(
-  SkTimePeriod                      result,
-  SkTimePeriod                      original
+  SkTimePeriod                          result,
+  SkTimePeriod                          original
 );
 
 SKAPI_ATTR void SKAPI_CALL skTimePeriodSetQuantum(
-  SkTimePeriod                      timePeriod,
-  SkTimeQuantum                     timeQuantum,
-  SkTimeUnits                       timeUnits
+  SkTimePeriod                          timePeriod,
+  SkTimeQuantum                         timeQuantum,
+  SkTimeUnits                           timeUnits
 );
 
 SKAPI_ATTR void SKAPI_CALL skTimePeriodAdd(
-  SkTimePeriod                      resultTimePeriod,
-  SkTimePeriod                      leftTimePeriod,
-  SkTimePeriod                      rightTimePeriod
+  SkTimePeriod                          resultTimePeriod,
+  SkTimePeriod                          leftTimePeriod,
+  SkTimePeriod                          rightTimePeriod
 );
 
 SKAPI_ATTR void SKAPI_CALL skTimePeriodScaleAdd(
-  SkTimePeriod                      resultTimePeriod,
-  SkTimeQuantum                     leftScalar,
-  SkTimePeriod                      leftTimePeriod,
-  SkTimePeriod                      rightTimePeriod
+  SkTimePeriod                          resultTimePeriod,
+  SkTimeQuantum                         leftScalar,
+  SkTimePeriod                          leftTimePeriod,
+  SkTimePeriod                          rightTimePeriod
 );
 
 SKAPI_ATTR void SKAPI_CALL skTimePeriodSubtract(
-  SkTimePeriod                      resultTimePeriod,
-  SkTimePeriod                      leftTimePeriod,
-  SkTimePeriod                      rightTimePeriod
+  SkTimePeriod                          resultTimePeriod,
+  SkTimePeriod                          leftTimePeriod,
+  SkTimePeriod                          rightTimePeriod
 );
 
 SKAPI_ATTR SkBool32 SKAPI_CALL skTimePeriodLess(
-  SkTimePeriod                      leftTimePeriod,
-  SkTimePeriod                      rightTimePeriod
+  SkTimePeriod                          leftTimePeriod,
+  SkTimePeriod                          rightTimePeriod
 );
 
 SKAPI_ATTR SkBool32 SKAPI_CALL skTimePeriodLessEqual(
-  SkTimePeriod                      leftTimePeriod,
-  SkTimePeriod                      rightTimePeriod
+  SkTimePeriod                          leftTimePeriod,
+  SkTimePeriod                          rightTimePeriod
 );
 
 SKAPI_ATTR SkBool32 SKAPI_CALL skTimePeriodIsZero(
-  SkTimePeriod                      timePeriod
+  SkTimePeriod                          timePeriod
 );
 
 SKAPI_ATTR float SKAPI_CALL skTimePeriodToFloat(
-  SkTimePeriod                      timePeriod,
-  SkTimeUnits                       timeUnits
+  SkTimePeriod                          timePeriod,
+  SkTimeUnits                           timeUnits
 );
 
 SKAPI_ATTR SkTimeQuantum SKAPI_CALL skTimePeriodToQuantum(
-  SkTimePeriod                      timePeriod,
-  SkTimeUnits                       timeUnits
+  SkTimePeriod                          timePeriod,
+  SkTimeUnits                           timeUnits
 );
 
 ////////////////////////////////////////////////////////////////////////////////
 // Stringize Functions
 ////////////////////////////////////////////////////////////////////////////////
+SKAPI_ATTR char const* SKAPI_CALL skGetResultString(
+  SkResult                              result
+);
+
 SKAPI_ATTR char const* SKAPI_CALL skGetObjectTypeString(
-  SkObjectType                      objectType
+  SkObjectType                          objectType
 );
 
 SKAPI_ATTR char const* SKAPI_CALL skGetStreamTypeString(
-  SkStreamType                      streamType
+  SkStreamType                          streamType
 );
 
 SKAPI_ATTR char const* SKAPI_CALL skGetStreamFlagString(
-  SkStreamFlags                     streamFlag
+  SkStreamFlags                         streamFlag
 );
 
 SKAPI_ATTR char const* SKAPI_CALL skGetFormatString(
-  SkFormat                          format
+  SkFormat                              format
 );
 
 SKAPI_ATTR char const* SKAPI_CALL skGetAccessModeString(
-  SkAccessMode                      accessMode
+  SkAccessMode                          accessMode
 );
 
 SKAPI_ATTR char const* SKAPI_CALL skGetAccessTypeString(
-  SkAccessType                      accessType
+  SkAccessType                          accessType
 );
 
 SKAPI_ATTR SkFormat SKAPI_CALL skGetFormatStatic(
-  SkFormat                          format
+  SkFormat                              format
 );
 
 SKAPI_ATTR char const* SKAPI_CALL skGetTimeUnitsString(
-  SkTimeUnits                       timeUnits
+  SkTimeUnits                           timeUnits
 );
 
 SKAPI_ATTR char const* SKAPI_CALL skGetTimeUnitsSymbolString(
-  SkTimeUnits                       timeUnits
+  SkTimeUnits                           timeUnits
 );
 
 #ifdef    __cplusplus

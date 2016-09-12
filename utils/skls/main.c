@@ -10,7 +10,10 @@
 
 // OpenSK Headers
 #include <OpenSK/opensk.h>
-#include <OpenSK/ext/utils.h>
+#include <OpenSK/dev/macros.h> // TODO: Remove!
+#include <OpenSK/ext/host_machine.h>
+#include <OpenSK/utl/color_database.h>
+#include <OpenSK/utl/string.h>
 
 // C99 Headers
 #include <stdio.h>
@@ -60,6 +63,7 @@ typedef struct Display {
   char separator;
   pfn_sort sortfnc;
   pfn_print printfnc;
+  SkHostMachineEXT hostMachine;
   SkColorDatabaseUTL colorDatabase;
 } Display;
 
@@ -99,19 +103,25 @@ printItem(Display *display, DisplayItem *item, size_t width) {
   }
 }
 
-static char const *
-toRangeModifier(SkRangeDirection dir) {
-  switch (dir) {
-    case SK_RANGE_DIRECTION_LESS:
-      return "-";
-    case SK_RANGE_DIRECTION_EQUAL:
-      return " ";
-    case SK_RANGE_DIRECTION_GREATER:
-      return "+";
-    default:
-      break;
+static SkResult
+constructDisplayItem(DisplayItem *displayItem) {
+  SkResult result;
+  memset(displayItem, 0, sizeof(DisplayItem));
+  result = skCreateStringUTL(NULL, &displayItem->displayName);
+  if (result != SK_SUCCESS) {
+    return result;
   }
-  return " ";
+  result = skCreateStringUTL(NULL, &displayItem->colorCode);
+  if (result != SK_SUCCESS) {
+    return result;
+  }
+  return SK_SUCCESS;
+}
+
+static void
+destructDisplayItem(DisplayItem *displayItem) {
+  skDestroyStringUTL(displayItem->displayName);
+  skDestroyStringUTL(displayItem->colorCode);
 }
 
 /*******************************************************************************
@@ -177,7 +187,7 @@ constructLayout(Display *display, DisplayItem *items, size_t itemCount) {
         } else {
           columnIdx = idx % layout->columnCount;
         }
-        layout->columnWidth[columnIdx] = SK_MAX(
+        layout->columnWidth[columnIdx] = SKMAX(
           layout->columnWidth[columnIdx],
           skStringLengthUTL(items[idx].displayName)
         );
@@ -245,7 +255,6 @@ quicksortStrcmp(DisplayItem *items, size_t lowIdx, size_t highIdx) {
   }
 }
 
-
 static void
 sortStrcmp(DisplayItem *items, size_t itemCount) {
   if (itemCount > 1) {
@@ -289,7 +298,8 @@ printcol(Display *display, DisplayItem *items, size_t itemCount) {
   Layout *layout = constructLayout(display, items, itemCount);
 
   if (layout->columnCount == 1) {
-    return printscol(display, items, itemCount);
+    printscol(display, items, itemCount);
+    return;
   }
 
   for (rowIdx = 0; rowIdx < layout->rowCount; ++rowIdx) {
@@ -389,8 +399,7 @@ static void
 displayCleanup(DisplayItem *items, size_t itemCount) {
   size_t idx;
   for (idx = 0; idx < itemCount; ++idx) {
-    skStringFreeUTL(items[idx].displayName);
-    skStringFreeUTL(items[idx].colorCode);
+    destructDisplayItem(&items[idx]);
   }
   free(items);
 }
@@ -444,21 +453,30 @@ displayUsage() {
 
 static int
 displayLimits(Display* display, SkComponentLimits* limits) {
-  printf("|_ Channels   : [%7u , %10u ]\n",      limits->minChannels,         limits->maxChannels);
-  printf("|_ Frame Size : [%7" PRIu64 " , %10" PRIu64 " ]\n",                 limits->minFrameSize,                             limits->maxFrameSize);
-  printf("|_ Rate       : [%7u%s, %10u%s]\n",    limits->minRate.value,       toRangeModifier(limits->minRate.direction),       limits->maxRate.value,       toRangeModifier(limits->maxRate.direction));
-  printf("|_ Buffer Time: [%7u%s, %10u%s]\n",    limits->minBufferTime.value, toRangeModifier(limits->minBufferTime.direction), limits->maxBufferTime.value, toRangeModifier(limits->maxBufferTime.direction));
-  printf("|_ Periods    : [%7u%s, %10u%s]\n",    limits->minPeriods.value,    toRangeModifier(limits->minPeriods.direction),    limits->maxPeriods.value,    toRangeModifier(limits->maxPeriods.direction));
-  printf("|_ Period Size: [%7u%s, %10u%s]\n",    limits->minPeriodSize.value, toRangeModifier(limits->minPeriodSize.direction), limits->maxPeriodSize.value, toRangeModifier(limits->maxPeriodSize.direction));
-  printf("\\_ Period Time: [%7u%s, %10u%s]\n\n", limits->minPeriodTime.value, toRangeModifier(limits->minPeriodTime.direction), limits->maxPeriodTime.value, toRangeModifier(limits->maxPeriodTime.direction));
-  printf("Formats:\n");
+  SkResult result;
+
+  printf( "|_ Channels   : [%7" PRIu32 ", %10" PRIu32 "]\n", limits->minChannels,   limits->maxChannels);
+  printf( "|_ Frame Size : [%7" PRIu64 ", %10" PRIu64 "]\n", limits->minFrameSize,  limits->maxFrameSize);
+  printf( "|_ Rate       : [%7" PRIu64 ", %10" PRIu64 "]\n", limits->minRate,       limits->maxRate);
+  printf( "|_ Buffer Time: [%7" PRIu64 ", %10" PRIu64 "]\n", skTimePeriodToQuantum(limits->minBufferTime, SK_TIME_UNITS_MICROSECONDS), skTimePeriodToQuantum(limits->maxBufferTime, SK_TIME_UNITS_MICROSECONDS));
+  printf( "|_ Periods    : [%7" PRIu64 ", %10" PRIu64 "]\n", limits->minPeriods,    limits->maxPeriods);
+  printf( "|_ Period Size: [%7" PRIu64 ", %10" PRIu64 "]\n", limits->minPeriodSize, limits->maxPeriodSize);
+  printf("\\_ Period Time: [%7" PRIu64 ", %10" PRIu64 "]\n", skTimePeriodToQuantum(limits->minPeriodTime, SK_TIME_UNITS_MICROSECONDS), skTimePeriodToQuantum(limits->maxPeriodTime, SK_TIME_UNITS_MICROSECONDS));
+  printf("\nFormats:\n");
 
   SkFormat format;
   uint32_t itemCount = 0;
   DisplayItem *items = calloc(SK_FORMAT_MAX, sizeof(DisplayItem));
-  for (format = SK_FORMAT_BEGIN; format != SK_FORMAT_MAX; ++format) {
+  for (format = SK_FORMAT_STATIC_BEGIN; format != SK_FORMAT_STATIC_END; ++format) {
     if (limits->supportedFormats[format]) {
-      skStringCopyUTL(items[itemCount].displayName, skGetFormatString(format));
+      result = constructDisplayItem(&items[itemCount]);
+      if (result != SK_SUCCESS) {
+        ERR("Failed to construct a display item (%s)!\n", skGetResultString(result));
+      }
+      result = skStringCopyUTL(items[itemCount].displayName, skGetFormatString(format));
+      if (result != SK_SUCCESS) {
+        ERR("Failed to copy a string display name (%s)!\n", skGetResultString(result));
+      }
       ++itemCount;
     }
   }
@@ -469,31 +487,43 @@ displayLimits(Display* display, SkComponentLimits* limits) {
   return 0;
 }
 
+
 #define PRINT_ENUM(e,v) if (e & v) { fputs(#v "\n", stdout); }
 static int
 displayComponent(Display* display, SkComponent component) {
   SkResult result;
   SkStreamType streamType;
-  SkComponentLimits limits;
-  SkComponentProperties properties;
-  skGetComponentProperties(component, &properties);
-  printf("Name: %s\n", properties.componentName);
-  if (properties.componentDescription[0] != '\0') {
-    printf("Description:\n%s\n", properties.componentDescription);
-  }
-  fputc('\n', stdout);
+  SkComponentLimits componentLimits;
+  SkComponentProperties componentProperties;
 
+  (void)display;
+
+  // Print high-level information
+  skGetComponentProperties(component, &componentProperties);
+  printf("Name: %s\n", componentProperties.componentName);
+  if (componentProperties.componentDescription[0] != '\0') {
+    printf("Description:\n%s\n", componentProperties.componentDescription);
+  }
+
+  // Print all stream type limits and properties.
   for (streamType = SK_STREAM_TYPE_BEGIN; streamType != SK_STREAM_TYPE_END; streamType <<= 1) {
-    if (properties.supportedStreams & streamType) {
-      result = skGetComponentLimits(component, streamType, &limits);
-      if (result != SK_SUCCESS) {
-        fprintf(stderr, "ERROR: Failed to get information about the PCM stream!\n");
-        continue;
+    if (componentProperties.supportedStreams & streamType) {
+      result = skGetComponentLimits(component, streamType, &componentLimits);
+      switch (result) {
+        case SK_SUCCESS:
+          printf("*= %s\n", skGetStreamTypeString(streamType));
+          displayLimits(display, &componentLimits);
+          break;
+        case SK_ERROR_STREAM_BUSY:
+          printf("%s is currently in-use, and cannot be queried for properties.\n\n", skGetStreamTypeString(streamType));
+          break;
+        default:
+          fprintf(stderr, "ERROR: Failed to get information about the PCM stream (%s)!\n", skGetResultString(result));
+          continue;
       }
-      printf("*= %s\n", skGetStreamTypeString(streamType));
-      displayLimits(display, &limits);
     }
   }
+
   return 0;
 }
 #undef PRINT_ENUM
@@ -544,13 +574,23 @@ displayDevices(Display* display, SkDevice *devices, uint32_t deviceCount) {
   // Add display items for physical and virtual devices
   for (idx = 0; idx < deviceCount; ++idx) {
     item = &items[idx];
+    result = constructDisplayItem(item);
+    if (result != SK_SUCCESS) {
+      ERR("Failed to construct display item (%s)!\n", skGetResultString(result));
+    }
     item->data = devices[idx];
     skGetDeviceProperties(devices[idx], &deviceProperties);
     colorKind = (deviceProperties.isPhysical) ? SKUTL_COLOR_KIND_PHYSICAL_DEVICE : SKUTL_COLOR_KIND_VIRTUAL_DEVICE;
-    colorCode = skGetColorCodeUTL(display->colorDatabase, deviceProperties.identifier, colorKind);
-    skStringCopyUTL(item->displayName, deviceProperties.identifier);
+    colorCode = skColorDatabaseGetCodeUTL(display->colorDatabase, colorKind, deviceProperties.identifier);
+    result = skStringCopyUTL(item->displayName, deviceProperties.identifier);
+    if (result != SK_SUCCESS) {
+      ERR("Failed to copy a string display name (%s)!\n", skGetResultString(result));
+    }
     if (colorCode) {
-      skStringCopyUTL(item->colorCode, colorCode);
+      result = skStringCopyUTL(item->colorCode, colorCode);
+      if (result != SK_SUCCESS) {
+        ERR("Failed to copy a string color code (%s)!\n", skGetResultString(result));
+      }
     }
     decimalCount = 0;
     totalObjects = deviceProperties.componentCount;
@@ -564,13 +604,23 @@ displayDevices(Display* display, SkDevice *devices, uint32_t deviceCount) {
   // Add display items for physical and virtual components
   for (idx = 0; idx < totalComponentCount; ++idx) {
     item = &items[idx + deviceCount];
+    result = constructDisplayItem(item);
+    if (result != SK_SUCCESS) {
+      ERR("Failed to construct display item (%s)!\n", skGetResultString(result));
+    }
     item->data = components[idx];
     skGetComponentProperties(components[idx], &componentProperties);
     colorKind = (componentProperties.isPhysical) ? SKUTL_COLOR_KIND_PHYSICAL_COMPONENT : SKUTL_COLOR_KIND_VIRTUAL_COMPONENT;
-    colorCode = skGetColorCodeUTL(display->colorDatabase, deviceProperties.identifier, colorKind);
-    skStringCopyUTL(item->displayName, componentProperties.identifier);
+    colorCode = skColorDatabaseGetCodeUTL(display->colorDatabase, colorKind, deviceProperties.identifier);
+    result = skStringCopyUTL(item->displayName, componentProperties.identifier);
+    if (result != SK_SUCCESS) {
+      ERR("Failed to copy a string display name (%s)!\n", skGetResultString(result));
+    }
     if (colorCode) {
-      skStringCopyUTL(item->colorCode, colorCode);
+      result = skStringCopyUTL(item->colorCode, colorCode);
+      if (result != SK_SUCCESS) {
+        ERR("Failed to copy a string color code (%s)!\n", skGetResultString(result));
+      }
     }
   }
 
@@ -701,10 +751,20 @@ displayInstance(Display *display, SkInstance instance) {
 
     // Configure the DisplayItem
     items[idx].data = hostApi[idx];
-    skStringCopyUTL(items[idx].displayName, properties.identifier);
-    colorCode = skGetColorCodeUTL(display->colorDatabase, properties.identifier, SKUTL_COLOR_KIND_HOSTAPI + properties.capabilities);
+    result = constructDisplayItem(&items[idx]);
+    if (result != SK_SUCCESS) {
+      ERR("Failed to construct display item (%s)!\n", skGetResultString(result));
+    }
+    result = skStringCopyUTL(items[idx].displayName, properties.identifier);
+    if (result != SK_SUCCESS) {
+      ERR("Failed to copy a string display name (%s)!\n", skGetResultString(result));
+    }
+    colorCode = skColorDatabaseGetCodeUTL(display->colorDatabase, SKUTL_COLOR_KIND_HOSTAPI + properties.capabilities, properties.identifier);
     if (colorCode) {
-      skStringCopyUTL(items[idx].colorCode, colorCode);
+      result = skStringCopyUTL(items[idx].colorCode, colorCode);
+      if (result != SK_SUCCESS) {
+        ERR("Failed to copy a string color code (%s)!\n", skGetResultString(result));
+      }
     }
     if (display->maxLength < skStringLengthUTL(items[idx].displayName)) {
       display->maxLength = skStringLengthUTL(items[idx].displayName);
@@ -766,7 +826,11 @@ int main(int argc, char const *argv[]) {
 #ifdef    OPENSK_UTILS_COLORS
   display.f_color = (isatty(STDOUT_FILENO)) ? 1 : 0;
 #endif // OPENSK_UTILS_COLORS
-  result = skConstructColorDatabaseUTL(&display.colorDatabase, NULL);
+  result = skCreateHostMachineEXT(NULL, &display.hostMachine, argc, argv);
+  if (result != SK_SUCCESS) {
+    ERR("Failed to construct the host machine!\n");
+  }
+  result = skCreateColorDatabaseUTL(NULL, &display.colorDatabase, display.hostMachine);
   if (result != SK_SUCCESS) {
     ERR("Failed to construct the color database!\n");
   }
@@ -836,7 +900,7 @@ int main(int argc, char const *argv[]) {
       if (idx >= argc) {
         ERR("Expected to parse an integer width for column count after -w.\n");
       }
-      if (sscanf(argv[idx], "%d", &display.displayWidth) != 1) {
+      if (sscanf(argv[idx], "%u", &display.displayWidth) != 1) {
         ERR("Failed to parse the width provided after -w (provided: '%s').\n", argv[idx]);
       }
     }
@@ -845,7 +909,7 @@ int main(int argc, char const *argv[]) {
         ERR("Expected --width to be set to an integral value (e.g. --width=80)\n");
       }
       param = &param[8];
-      if (sscanf(param, "%d", &display.displayWidth) != 1) {
+      if (sscanf(param, "%u", &display.displayWidth) != 1) {
         ERR("Failed to parse the width provided after --width=<value> (provided: '%s').\n", param);
       }
     }
@@ -952,7 +1016,7 @@ int main(int argc, char const *argv[]) {
   instanceInfo.ppEnabledExtensionNames = NULL;
 
   SkInstance instance;
-  result = skCreateInstance(&instanceInfo, NULL, &instance);
+  result = skCreateInstance(NULL, &instanceInfo, &instance);
   if (result != SK_SUCCESS) {
     ERR("Failed to create OpenSK instance: %d\n", result);
   }

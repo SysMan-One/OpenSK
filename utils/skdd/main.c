@@ -10,8 +10,8 @@
 
 // OpenSK Headers
 #include <OpenSK/opensk.h>
-#include <OpenSK/ext/utils.h>
-#include <OpenSK/ext/ringbuffer.h>
+#include <OpenSK/ext/ring_buffer.h>
+#include <OpenSK/utl/string.h>
 
 // C99 Headers
 #include <stdio.h>
@@ -277,6 +277,8 @@ initializeStream(DataDuplicator *dd, SkStreamInfo *streamRequest, DataDescriptor
  ******************************************************************************/
 static int
 describeData_asFile(DataDuplicator *dd, DataDescriptor *data) {
+  (void)dd;
+  (void)data;
   ERR("File processing is currently unsupported by skdd.\n");
 }
 
@@ -361,10 +363,11 @@ addDefintion(DataSet *set, char const* pathName, SkStreamType type, DataDirectio
     set->data[set->count].dataType = DT_STREAM;
   }
   set->data[set->count].descriptorType = descriptorType;
+  skCreateStringUTL(NULL, &set->data[set->count].pathName);
 
   // This initializes the path name for either the file or stream
   result = skStringCopyUTL(set->data[set->count].pathName, pathName);
-  if (result == SK_FALSE) {
+  if (result != SK_SUCCESS) {
     ERR("Failed copying path name in DataSet for '%s'.\n", pathName);
   }
 
@@ -373,14 +376,26 @@ addDefintion(DataSet *set, char const* pathName, SkStreamType type, DataDirectio
 }
 
 static void
-printRingBuffer(DataDuplicator const* dd, SkRingBuffer ringBuffer) {
-  size_t display = dd->displayWidth;
-  if (display <= 2) return;
-  display -= 2;
-  void* pCapacityBegin = skGetRingBufferCapacityBegin(ringBuffer);
-  ptrdiff_t total  = skGetRingBufferCapacityEnd(ringBuffer) - pCapacityBegin;
-  size_t pBegin = (size_t)(display * ((float)(skGetRingBufferDataBegin(ringBuffer) - pCapacityBegin) / total));
-  size_t pEnd   = (size_t)(display * ((float)(skGetRingBufferDataEnd(ringBuffer)   - pCapacityBegin) / total));
+printRingBuffer(DataDuplicator const* dd, SkRingBufferEXT ringBuffer) {
+  size_t display;
+  ptrdiff_t total;
+  size_t pBegin;
+  size_t pEnd;
+  SkRingBufferDebugInfoEXT debugInfo;
+
+  // Check that the display is large enough to print a ring buffer
+  if (dd->displayWidth <= 2) {
+    return;
+  }
+  display = dd->displayWidth - 2;
+
+  // Calculate the ring buffer information
+  skRingBufferDebugInfoEXT(ringBuffer, &debugInfo);
+  total  = skRingBufferCapacityEXT(ringBuffer);
+  pBegin = (size_t)(display * ((float)((char*)debugInfo.pDataBegin - (char*)debugInfo.pCapacityBegin) / total));
+  pEnd   = (size_t)(display * ((float)((char*)debugInfo.pDataEnd   - (char*)debugInfo.pCapacityBegin) / total));
+
+  // Print the ring buffer
   putc('\r', stdout);
   putc('[', stdout);
   for (uint32_t c = 0; c < display; ++c) {
@@ -415,13 +430,13 @@ printRingBuffer(DataDuplicator const* dd, SkRingBuffer ringBuffer) {
 }
 
 static size_t
-transferData(DataDuplicator const* dd, SkRingBuffer ringBuffer, int64_t response, size_t sampleBytes, int isWriteLocation) {
+transferData(DataDuplicator const* dd, SkRingBufferEXT ringBuffer, int64_t response, size_t sampleBytes, int isWriteLocation) {
   if (response >= 0) {
     if (isWriteLocation) {
-      skRingBufferAdvanceWriteLocation(ringBuffer, (size_t) response * sampleBytes);
+      skRingBufferAdvanceWriteLocationEXT(ringBuffer, (size_t) response * sampleBytes);
     }
     else {
-      skRingBufferAdvanceReadLocation(ringBuffer, (size_t) response * sampleBytes);
+      skRingBufferAdvanceReadLocationEXT(ringBuffer, (size_t) response * sampleBytes);
     }
     if (dd->debugInfo.f_printRingBuffer && response > 0) {
       printRingBuffer(dd, ringBuffer);
@@ -459,7 +474,7 @@ static int
 processData(DataDuplicator* dd) {
   int64_t samples;
   SkResult result;
-  SkRingBuffer ringBuffer;
+  SkRingBufferEXT ringBuffer;
   SkPcmStreamInfo* outInfo;
   SkPcmStreamInfo* inInfo;
   SkStream inStream;
@@ -467,8 +482,6 @@ processData(DataDuplicator* dd) {
   uint32_t sampleBytes;
   void* pBuffer;
   size_t sampleSwLatency;
-  size_t sampleHwLatency;
-  size_t bufferSampleBytes;
   SkTimePeriod totalRuntime;
 
   // Shortcuts to regularly-used variables
@@ -477,12 +490,10 @@ processData(DataDuplicator* dd) {
   inStream    = dd->in.data->endpoint.asStream.stream;
   outStream   = dd->out.data->endpoint.asStream.stream;
   sampleBytes = outInfo->sampleBits / 8;
-  bufferSampleBytes = inInfo->bufferBits / 8;
 
   // Calculate the important sample values (delay and duration)
   skTimePeriodClear(totalRuntime);
   sampleSwLatency = timeValueToSamples(dd->softwareLatency, outInfo->sampleRate);
-  sampleHwLatency = timeValueToSamples(dd->hardwareLatency, outInfo->sampleRate);
 
   // Construct the minimal ring buffer
   // Note: Minimally we should hold the same amount of data that the hardware does.
@@ -490,7 +501,7 @@ processData(DataDuplicator* dd) {
   //       we also have to hold those samples. (Meaning there is a RAM-dependant limit to delay)
   size_t ringBufferSamples = sampleSwLatency + inInfo->bufferSamples;
   size_t ringBufferSize = ringBufferSamples * sampleBytes;
-  result = skRingBufferCreate(&ringBuffer, ringBufferSize, NULL);
+  result = skCreateRingBufferEXT(NULL, &ringBuffer, ringBufferSize);
   if (result != SK_SUCCESS) {
     ERR("Failed to create SkRingBuffer of size %zu: %d\n", ringBufferSize, result);
   }
@@ -502,14 +513,14 @@ processData(DataDuplicator* dd) {
 
     // Capture the required preload sample amount
     do {
-      sizeBytes = skRingBufferNextWriteLocation(ringBuffer, &pBuffer);
+      sizeBytes = skRingBufferNextWriteLocationEXT(ringBuffer, &pBuffer);
       samples = skStreamReadInterleaved(inStream, pBuffer, (uint32_t) (sizeBytes / sampleBytes));
       samplesPending += transferData(dd, ringBuffer, samples, sampleBytes, 1);
     } while (samplesPending < sampleSwLatency || !samplesPending);
     sampleSwLatency = 0;
 
     // Playback samples
-    sizeBytes = skRingBufferNextReadLocation(ringBuffer, &pBuffer);
+    sizeBytes = skRingBufferNextReadLocationEXT(ringBuffer, &pBuffer);
     samples = skStreamWriteInterleaved(outStream, pBuffer, (uint32_t) (sizeBytes / sampleBytes));
     samples = transferData(dd, ringBuffer, samples, sampleBytes, 0);
     // TODO: Is there anything we can do if we XRUN? That would mean we didn't have N samples prepared,
@@ -522,7 +533,7 @@ processData(DataDuplicator* dd) {
     }
 
   } while (skTimePeriodIsZero(dd->totalDuration) || skTimePeriodLess(totalRuntime, dd->totalDuration));
-  skRingBufferDestroy(ringBuffer, NULL);
+  skDestroyRingBufferEXT(ringBuffer);
 
   return 0;
 }
@@ -551,8 +562,8 @@ displayUsage() {
       "  duration=TIME     The target duration of the whole stream operation (default=infinite).\n"
       "                    Supported: #us, #ms, #s, #m, #h, #d (Where # is any positive integer).\n"
       "  samplerate=N      The target input/output samplerate (default=48000).\n"
-      "  periods=N         The number of periods to support per stream (default=4).\n"
-      "  period-samples=N  The number of samples in a period (default=144).\n"
+      "  periods=N         The number of periods to support per stream (default=2).\n"
+      "  period-samples=N  The number of samples in a period (default=1024).\n"
       "  channels=N        The number of channels in to support (default=2).\n"
       "  format=FLAG       The underlying data type for the stream (default=LAST).\n"
       "                    Supported: char/int8, short/int16, int/int32, uint8, uint16, unsigned/uint32, float/float32, float64.\n"
@@ -561,8 +572,9 @@ displayUsage() {
 
 int
 main(int argc, char const *argv[]) {
+  int idx;
   int iResult;
-  uint32_t idx;
+  uint32_t udx;
   SkResult result;
   char const *param;
   char const *value;
@@ -582,17 +594,17 @@ main(int argc, char const *argv[]) {
   dd.inRequest.pcm.formatType     = SK_FORMAT_LAST_STATIC;
   dd.inRequest.pcm.sampleRate     = 48000;
   dd.inRequest.pcm.channels       = 2;
-  dd.inRequest.pcm.periods        = 4;
-  dd.inRequest.pcm.periodSamples  = 144;
+  dd.inRequest.pcm.periods        = 2;
+  dd.inRequest.pcm.periodSamples  = 1024;
   dd.outRequest.streamType        = SK_STREAM_TYPE_PCM_PLAYBACK;
   dd.outRequest.pcm.accessMode    = SK_ACCESS_MODE_NONBLOCK;
   dd.outRequest.pcm.streamFlags   = SK_STREAM_FLAGS_POLL_AVAILABLE;
   dd.outRequest.pcm.accessType    = SK_ACCESS_TYPE_INTERLEAVED;
   dd.outRequest.pcm.formatType    = SK_FORMAT_ANY;
   dd.outRequest.pcm.sampleRate    = 0;
-  dd.outRequest.pcm.channels      = 0;
-  dd.outRequest.pcm.periods       = 0;
-  dd.outRequest.pcm.periodSamples = 0;
+  dd.outRequest.pcm.channels      = 2;
+  dd.outRequest.pcm.periods       = 2;
+  dd.outRequest.pcm.periodSamples = 1024;
 
   // Check for terminal information for pretty-printing
   if (isatty(STDOUT_FILENO)) {
@@ -761,7 +773,7 @@ main(int argc, char const *argv[]) {
   instanceInfo.enabledExtensionCount = 0;
   instanceInfo.ppEnabledExtensionNames = NULL;
 
-  result = skCreateInstance(&instanceInfo, NULL, &dd.instance);
+  result = skCreateInstance(NULL, &instanceInfo, &dd.instance);
   if (result != SK_SUCCESS) {
     ERR("Failed to create OpenSK instance: %d\n", result);
   }
@@ -769,8 +781,8 @@ main(int argc, char const *argv[]) {
   //////////////////////////////////////////////////////////////////////////////
   // Fully-describe the data being manipulated
   //////////////////////////////////////////////////////////////////////////////
-  for (idx = 0; idx < dd.in.count; ++idx) {
-    iResult = describeData(&dd, &dd.in.data[idx]);
+  for (udx = 0; udx < dd.in.count; ++udx) {
+    iResult = describeData(&dd, &dd.in.data[udx]);
     if (iResult) {
       ERR("Unrecoverable error detected, aborting.\n");
     }
@@ -779,22 +791,22 @@ main(int argc, char const *argv[]) {
   if (iResult) {
     ERR("Unrecoverable error detected, aborting.\n");
   }
-  for (idx = 0; idx < dd.out.count; ++idx) {
-    iResult = describeData(&dd, &dd.out.data[idx]);
+  for (udx = 0; udx < dd.out.count; ++udx) {
+    iResult = describeData(&dd, &dd.out.data[udx]);
     if (iResult) {
       ERR("Unrecoverable error detected, aborting.\n");
     }
   }
 
   // Calculate the hardware latencies (based on the results from all input/output data)
-  for (idx = 0; idx < dd.in.count; ++idx) {
-    if (skTimePeriodLess(dd.maxInputLatency, dd.in.data[idx].endpoint.asStream.streamInfo.pcm.periodTime)) {
-      skTimePeriodSet(dd.maxInputLatency, dd.in.data[idx].endpoint.asStream.streamInfo.pcm.periodTime);
+  for (udx = 0; udx < dd.in.count; ++udx) {
+    if (skTimePeriodLess(dd.maxInputLatency, dd.in.data[udx].endpoint.asStream.streamInfo.pcm.periodTime)) {
+      skTimePeriodSet(dd.maxInputLatency, dd.in.data[udx].endpoint.asStream.streamInfo.pcm.periodTime);
     }
   }
-  for (idx = 0; idx < dd.out.count; ++idx) {
-    if (skTimePeriodLess(dd.maxOutputLatency, dd.out.data[idx].endpoint.asStream.streamInfo.pcm.periodTime)) {
-      skTimePeriodSet(dd.maxOutputLatency, dd.out.data[idx].endpoint.asStream.streamInfo.pcm.periodTime);
+  for (udx = 0; udx < dd.out.count; ++udx) {
+    if (skTimePeriodLess(dd.maxOutputLatency, dd.out.data[udx].endpoint.asStream.streamInfo.pcm.periodTime)) {
+      skTimePeriodSet(dd.maxOutputLatency, dd.out.data[udx].endpoint.asStream.streamInfo.pcm.periodTime);
     }
   }
   skTimePeriodAdd(dd.hardwareLatency, dd.maxInputLatency, dd.maxOutputLatency);
