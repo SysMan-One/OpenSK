@@ -1,0 +1,19 @@
+{
+  "sk_manifest": "1.0.0",
+  "drivers": [
+    {
+      "id": "alsa",
+      "uuid": "bf795994-7360-4531-a0a2-65c4be3a1098",
+      "name": "SK_DRIVER_OPENSK_ALSA",
+      "display_name": "OpenSK (ALSA)",
+      "library_path": "libskDriverAlsa.so",
+      "description": "Advanced Linux Sound Architecture (ALSA)",
+      "api_version": "0.0.0",
+      "impl_version": "0",
+      "disable_environment": "SK_DISABLE_DRIVER_OPENSK_ALSA",
+      "functions": {
+        "skGetDriverProcAddr": "skGetDriverProcAddr_alsa"
+      }
+    }
+  ]
+}

@@ -13,42 +13,20 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *------------------------------------------------------------------------------
- * OpenSK standard include header.
+ * List of macros for OpenSK Utilities to utilize.
  ******************************************************************************/
-#ifndef   OPENSK_PLATFORM_H
-#define   OPENSK_PLATFORM_H 1
 
-#ifdef    __cplusplus
-extern "C" {
-#endif // __cplusplus
+#include <stdio.h>  // fprintf
 
-#if defined(_MSC_VER)
-# if   defined(SK_EXPORT)
-#  define SKAPI_ATTR __declspec(dllexport)
-# elif defined(SK_IMPORT)
-#  define SKAPI_ATTR __declspec(dllimport)
-# else
-#  define SKAPI_ATTR extern
-# endif
-# define SKAPI_LOCAL
-# define SKAPI_CALL __stdcall
-# define SKAPI_PTR  __stdcall
-#elif defined(__GNUC__)
-# define SKAPI_ATTR __attribute__((visibility("default")))
-# define SKAPI_CALL
-# define SKAPI_PTR
-#else
-# define SKAPI_ATTR
-# define SKAPI_CALL
-# define SKAPI_PTR
-#endif
+// Stringizing macros
+#define __SKSTR(a) #a
+#define _SKSTR(a) __SKSTR(a)
+#define SKSTR(a) _SKSTR(a)
 
-// C99
-#include <stdint.h>
-#include <stddef.h>
+// Min/Max macros
+#define SKMAX(a, b) (((a) > (b)) ? (a) : (b))
+#define SKMIN(a, b) (((a) < (b)) ? (a) : (b))
 
-#ifdef    __cplusplus
-}
-#endif // __cplusplus
-
-#endif // OPENSK_PLATFORM_H
+// Reporting macros
+#define SKERR(...) do { fprintf(stderr, "error: " __VA_ARGS__); fputc('\n', stderr); } while (0)
+#define SKWRN(...) do { fprintf(stderr, "warn : " __VA_ARGS__); fputc('\n', stderr); } while (0)

@@ -1,5 +1,17 @@
 /*******************************************************************************
- * OpenSK (utility) - All content 2016 Trent Reed, all rights reserved.
+ * Copyright 2016 Trent Reed
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  *------------------------------------------------------------------------------
  * A set of string utility functions (for dynamic and C-Strings).
  ******************************************************************************/
@@ -24,100 +36,111 @@ SK_DEFINE_HANDLE(SkStringUTL);
 // String Functions (General)
 ////////////////////////////////////////////////////////////////////////////////
 
-SKAPI_ATTR SkBool32 SKAPI_CALL _skCheckParamUTL(
+SkBool32 SKAPI_CALL _skCheckParamUTL(
   char const*                           string,
   ...
 );
 #define skCheckParamUTL(param, ...) _skCheckParamUTL(param, __VA_ARGS__, NULL)
 
-SKAPI_ATTR SkBool32 SKAPI_CALL _skCheckParamBeginsUTL(
+SkBool32 SKAPI_CALL _skCheckParamBeginsUTL(
   char const*                           string,
   ...
 );
 #define skCheckParamBeginsUTL(param, ...) _skCheckParamBeginsUTL(param, __VA_ARGS__, NULL)
 
-SKAPI_ATTR SkBool32 SKAPI_CALL skCStrCompareUTL(
+SkBool32 SKAPI_CALL _skCStrCompareEndsUTL(
+  char const*                           string,
+  ...
+);
+#define skCStrCompareEndsUTL(param, ...) _skCStrCompareEndsUTL(param, __VA_ARGS__, NULL)
+
+SkBool32 SKAPI_CALL skCStrCompareUTL(
   char const*                           lhsString,
   char const*                           rhsString
 );
 
-SKAPI_ATTR SkBool32 SKAPI_CALL skCStrCompareBeginsUTL(
+SkBool32 SKAPI_CALL skCStrCompareBeginsUTL(
   char const*                           string,
   char const*                           startsWith
 );
 
-SKAPI_ATTR SkBool32 SKAPI_CALL skCStrCompareCaseInsensitiveUTL(
+SkBool32 SKAPI_CALL skCStrCompareCaseInsensitiveUTL(
   char const*                           lhsString,
   char const*                           rhsString
+);
+
+void SKAPI_CALL skPrintUuidUTL(
+  uint8_t                               uuid[SK_UUID_SIZE]
 );
 
 ////////////////////////////////////////////////////////////////////////////////
 // String Functions (SkStringUTL)
 ////////////////////////////////////////////////////////////////////////////////
 
-SKAPI_ATTR SkResult SKAPI_CALL skCreateStringUTL(
+SkResult SKAPI_CALL skCreateStringUTL(
   SkAllocationCallbacks const*          pAllocator,
+  SkSystemAllocationScope               allocationScope,
   SkStringUTL*                          pString
 );
 
-SKAPI_ATTR void SKAPI_CALL skDestroyStringUTL(
+void SKAPI_CALL skDestroyStringUTL(
   SkStringUTL                           string
 );
 
-SKAPI_ATTR SkResult SKAPI_CALL skStringResizeUTL(
+SkResult SKAPI_CALL skStringResizeUTL(
   SkStringUTL                           string,
   size_t                                newSize
 );
 
-SKAPI_ATTR SkResult SKAPI_CALL skStringReserveUTL(
+SkResult SKAPI_CALL skStringReserveUTL(
   SkStringUTL                           string,
   size_t                                reservedSize
 );
 
-SKAPI_ATTR SkResult SKAPI_CALL skStringNCopyUTL(
+SkResult SKAPI_CALL skStringNCopyUTL(
   SkStringUTL                           string,
   char const*                           sourceString,
   size_t                                sourceLength
 );
 
-SKAPI_ATTR SkResult SKAPI_CALL skStringCopyUTL(
+SkResult SKAPI_CALL skStringCopyUTL(
   SkStringUTL                           string,
   char const*                           sourceString
 );
 
-SKAPI_ATTR SkResult SKAPI_CALL skStringNAppendUTL(
+SkResult SKAPI_CALL skStringNAppendUTL(
   SkStringUTL                           string,
   char const*                           sourceString,
   size_t                                sourceLength
 );
 
-SKAPI_ATTR SkResult SKAPI_CALL skStringAppendUTL(
+SkResult SKAPI_CALL skStringAppendUTL(
   SkStringUTL                           string,
   char const*                           sourceString
 );
 
-SKAPI_ATTR void SKAPI_CALL skStringSwapUTL(
+void SKAPI_CALL skStringSwapUTL(
   SkStringUTL                           lhsString,
   SkStringUTL                           rhsString
 );
 
-SKAPI_ATTR char* SKAPI_CALL skStringDataUTL(
+char* SKAPI_CALL skStringDataUTL(
   SkStringUTL                           string
 );
 
-SKAPI_ATTR size_t SKAPI_CALL skStringLengthUTL(
+size_t SKAPI_CALL skStringLengthUTL(
   SkStringUTL                           string
 );
 
-SKAPI_ATTR size_t SKAPI_CALL skStringCapacityUTL(
+size_t SKAPI_CALL skStringCapacityUTL(
   SkStringUTL                           string
 );
 
-SKAPI_ATTR SkBool32 SKAPI_CALL skStringEmptyUTL(
+SkBool32 SKAPI_CALL skStringEmptyUTL(
   SkStringUTL                           string
 );
 
-SKAPI_ATTR void SKAPI_CALL skStringClearUTL(
+void SKAPI_CALL skStringClearUTL(
   SkStringUTL                           string
 );
 

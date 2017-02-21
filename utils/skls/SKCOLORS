@@ -1,32 +1,47 @@
 ################################################################################
 # Default color configuration for all OpenSK Utilities
 # Resolved in the following order (each file overrides settings):
-# 1. {pwd}/SKCOLORS
-# 2. {pwd}/SKCOLORS.$TERM
+# 1. ${exe-dir}/SKCOLORS
+# 2. ${exe-dir}/SKCOLORS.$TERM
 # 3. $HOME/.skcolors
 # 4. $HOME/.skcolors.$TERM
 ################################################################################
-# Here are the symbolic color names, latest valid color is used for a symbol.
-# NORMAL := The default color to reset to.
-# HOSTAPI := The default color for an SkHostApi.
-# HOSTAPI(?) := Replace "?" with the long-form API capabilities, * means any.
-# DEVICE := The default color for any Sk*Device type.
-# DEVICE(?) := Replace "?" with the long-form API capabilities, * means any.
-# PDEVICE := The default color for an SkPhysicalDevice.
-# PDEVICE(?) := Replace "?" with the long-form API capabilities, * means any.
-# VDEVICE := The default color for an SkVirtualDevice.
-# VDEVICE(?) := Replace "?" with the long-form API capabilities, * means any.
-# COMPONENT := The default color for any Sk*Component type.
-# COMPONENT(?) := Replace "?" with the long-form API capabilities, * means any.
-# PCOMPONENT := The default color for an SkPhysicalComponent.
-# PCOMPONENT(?) := Replace "?" with the long-form API capabilities, * means any.
-# VCOMPONENT := The default color for an SkVirtualComponent.
-# VCOMPONENT(?) := Replace "?" with the long-form API capabilities, * means any.
+# Types:
+# NORMAL    := The default color for any object.
+# DRIVER    := The default color for an SkDriver.
+# DEVICE    := The default color for any SkDevice type.
+# ENDPOINT  := The default color for any SkEndpoint type.
+# DENDPOINT := The default color for any SkEndpoint under an SkDevice.
+# <name>    := The name of a particular element (e.g. "alsa")
+#
+# Text Effects: (Default is a special keyword for resetting the format)
+# Bold      := The text weight is bold instead of regular.
+# Faint     := The text weight is faint instead of regular.
+# Italic    := The text style is italic.
+# Underline := The text has an underline
+# Blink     := The text is blinking at some constant speed.
+# Negative  := The text/background color is inverted.
+#
+# Text Colors:
+# Regular   := Whatever the default color is.
+# Black     := The color black.
+# Red       := The color red.
+# Green     := The color green.
+# Yellow    := The color yellow.
+# Blue      := The color blue.
+# Magenta   := The color magenta.
+# Cyan      := The color cyan.
+# Gray      := The color gray.
+#
+# Syntax:
+# <Type>    =>  [<Effects>] [,] [<Color> Foreground] [,] [<Color> Background]
+#
+# Examples:
+# DEVICE    =>  Yellow Foreground, Blue Background
+# alsa      =>  Underline Bright, Gray Background
 ################################################################################
-NORMAL 00
-HOSTAPI 01;34       # Provide a default color scheme for HOSTAPI types.
-HOSTAPI(*---) 01;31 # Specifically, types without functionality are red.
-PDEVICE 01;32       # All physical devices are printed in a bold green color.
-VDEVICE 01;34       # All virtual devices are printed in a bold blue color.
-PCOMPONENT 32       # All physical components are green, but not bold.
-VCOMPONENT 34       # All virtual components are blue, but not bold.
+NORMAL      =>  Default
+DRIVER      =>  Bold, Blue Foreground
+DEVICE      =>  Bold, Green Foreground
+DENDPOINT   =>  Green Foreground
+ENDPOINT    =>  Blue Foreground

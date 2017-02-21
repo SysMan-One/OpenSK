@@ -1,20 +1,34 @@
 /*******************************************************************************
- * OpenSK (utility) - All content 2016 Trent Reed, all rights reserved.
+ * Copyright 2016 Trent Reed
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  *------------------------------------------------------------------------------
  * A set of string utility functions (for dynamic and C-Strings).
  ******************************************************************************/
 
 // OpenSK
-#include <OpenSK/dev/macros.h>
+#include <OpenSK/ext/sk_global.h>
 #include <OpenSK/utl/string.h>
 
 // C99
 #include <ctype.h>
 #include <stdarg.h>
 #include <string.h>
+#include <stdio.h>
 
 typedef struct SkStringUTL_T {
   SkAllocationCallbacks const*          pAllocator;
+  SkSystemAllocationScope               allocationScope;
   char*                                 pBegin;
   char*                                 pEnd;
   size_t                                capacity;
@@ -72,6 +86,47 @@ SKAPI_ATTR SkBool32 SKAPI_CALL _skCheckParamBeginsUTL(
   return passing;
 }
 
+SKAPI_ATTR SkBool32 SKAPI_CALL _skCStrCompareEndsUTL(
+  char const*                           string,
+  ...
+) {
+  SkBool32 passing;
+  va_list ap;
+  char const *cmp;
+  char const *end;
+  char const *stringend;
+  char const *cmpend;
+
+  // Find the end of the string
+  stringend = string;
+  while (*stringend) ++stringend;
+
+  passing = SK_FALSE;
+  va_start(ap, string);
+  cmp = va_arg(ap, char const*);
+  while (cmp != NULL)
+  {
+    end = stringend;
+    cmpend = cmp;
+    while (*cmpend) ++cmpend;
+    while (end != string && cmpend != cmp) {
+      if (*end != *cmpend) {
+        break;
+      }
+      --end;
+      --cmpend;
+    }
+    if (cmp == cmpend && *cmp == *end) {
+      passing = SK_TRUE;
+      break;
+    }
+    cmp = va_arg(ap, char const*);
+  }
+  va_end(ap);
+
+  return passing;
+}
+
 SKAPI_ATTR SkBool32 SKAPI_CALL skCStrCompareUTL(
   char const*                           lhsString,
   char const*                           rhsString
@@ -105,28 +160,71 @@ SKAPI_ATTR SkBool32 SKAPI_CALL skCStrCompareCaseInsensitiveUTL(
   return (*lhsString == *rhsString) ? SK_TRUE : SK_FALSE;
 }
 
+static void skPrintHex8IMPL(
+  uint8_t                               n
+) {
+  printf("%02x", n);
+}
+
+SKAPI_ATTR void SKAPI_CALL skPrintUuidUTL(
+  uint8_t                               uuid[SK_UUID_SIZE]
+) {
+  skPrintHex8IMPL(uuid[0]);
+  skPrintHex8IMPL(uuid[1]);
+  skPrintHex8IMPL(uuid[2]);
+  skPrintHex8IMPL(uuid[3]);
+  putc('-', stdout);
+  skPrintHex8IMPL(uuid[4]);
+  skPrintHex8IMPL(uuid[5]);
+  putc('-', stdout);
+  skPrintHex8IMPL(uuid[6]);
+  skPrintHex8IMPL(uuid[7]);
+  putc('-', stdout);
+  skPrintHex8IMPL(uuid[8]);
+  skPrintHex8IMPL(uuid[8]);
+  putc('-', stdout);
+  skPrintHex8IMPL(uuid[10]);
+  skPrintHex8IMPL(uuid[11]);
+  skPrintHex8IMPL(uuid[12]);
+  skPrintHex8IMPL(uuid[13]);
+  skPrintHex8IMPL(uuid[14]);
+  skPrintHex8IMPL(uuid[15]);
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // String Functions (SkStringUTL)
 ////////////////////////////////////////////////////////////////////////////////
 
 SKAPI_ATTR SkResult SKAPI_CALL skCreateStringUTL(
   SkAllocationCallbacks const*          pAllocator,
+  SkSystemAllocationScope               allocationScope,
   SkStringUTL*                          pString
 ) {
   SkStringUTL string;
 
-  string = SKALLOC(pAllocator, sizeof(SkStringUTL_T), SK_SYSTEM_ALLOCATION_SCOPE_UTILITY);
+  string = skAllocate(
+    pAllocator,
+    sizeof(SkStringUTL_T),
+    1,
+    allocationScope
+  );
   if (!string) {
     return SK_ERROR_OUT_OF_HOST_MEMORY;
   }
 
-  string->pBegin = SKALLOC(pAllocator, SKUTL_STRING_DEFAULT_CAPACITY + 1, SK_SYSTEM_ALLOCATION_SCOPE_UTILITY);
+  string->pBegin = skAllocate(
+    pAllocator,
+    SKUTL_STRING_DEFAULT_CAPACITY + 1,
+    1,
+    allocationScope
+  );
   if (!string->pBegin) {
     return SK_ERROR_OUT_OF_HOST_MEMORY;
   }
 
   string->pEnd = string->pBegin;
   string->pAllocator = pAllocator;
+  string->allocationScope = allocationScope;
   string->capacity = SKUTL_STRING_DEFAULT_CAPACITY;
 
   (*pString) = string;
@@ -136,8 +234,8 @@ SKAPI_ATTR SkResult SKAPI_CALL skCreateStringUTL(
 SKAPI_ATTR void SKAPI_CALL skDestroyStringUTL(
   SkStringUTL                           string
 ) {
-  SKFREE(string->pAllocator, string->pBegin);
-  SKFREE(string->pAllocator, string);
+  skFree(string->pAllocator, string->pBegin);
+  skFree(string->pAllocator, string);
 }
 
 SKAPI_ATTR SkResult SKAPI_CALL skStringResizeUTL(
@@ -157,17 +255,22 @@ SKAPI_ATTR SkResult SKAPI_CALL skStringResizeUTL(
   }
 
   // Resize the string if the capacity is less than the requested size
-  newString = SKALLOC(string->pAllocator, newSize + 1, SK_SYSTEM_ALLOCATION_SCOPE_UTILITY);
+  newString = skAllocate(
+    string->pAllocator,
+    newSize + 1,
+    1,
+    string->allocationScope
+  );
   if (!newString) {
     return SK_ERROR_OUT_OF_HOST_MEMORY;
   }
 
   // Copy the old string to the new location
   copySize = skStringLengthUTL(string);
-  copySize = SKMIN(newSize, copySize);
+  copySize = (newSize < copySize) ? newSize : copySize;
   memcpy(newString, skStringDataUTL(string), copySize);
   newString[copySize] = 0;
-  SKFREE(string->pAllocator, string->pBegin);
+  skFree(string->pAllocator, string->pBegin);
 
   // Update string metadata for dynamic allocations
   string->pBegin = newString;

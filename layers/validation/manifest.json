@@ -1,0 +1,22 @@
+{
+  "sk_manifest": "1.0.0",
+  "layers": [
+    {
+      "uuid": "8e55163b-1c23-4b16-9550-3c662f7eca89",
+      "name": "SK_LAYER_OPENSK_VALIDATION",
+      "display_name": "OpenSK (Validation Layer)",
+      "library_path": "libskLayerValidation.so",
+      "description": "A layer which validates the input and output values for functions.",
+      "api_version": "0.0.0",
+      "impl_version": "0",
+      "enable_environment": "SK_LAYER_OPENSK_VALIDATION_1",
+      "disable_environment": "SK_LAYER_OPENSK_VALIDATION_DISABLE",
+      "functions" : {
+        "skGetLayerProperties": "skGetLayerProperties_validation",
+        "skGetInstanceProcAddr": "skGetInstanceProcAddr_validation",
+        "skGetDriverProcAddr": "skGetDriverProcAddr_validation",
+        "skGetPcmStreamProcAddr": "skGetPcmStreamProcAddr_validation"
+      }
+    }
+  ]
+}

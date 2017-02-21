@@ -13,42 +13,19 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *------------------------------------------------------------------------------
- * OpenSK standard include header.
+ * OpenSK developer header. (Will not be present in final package, internal.)
  ******************************************************************************/
-#ifndef   OPENSK_PLATFORM_H
-#define   OPENSK_PLATFORM_H 1
 
-#ifdef    __cplusplus
-extern "C" {
-#endif // __cplusplus
+#include <OpenSK/dev/utils.h>
 
-#if defined(_MSC_VER)
-# if   defined(SK_EXPORT)
-#  define SKAPI_ATTR __declspec(dllexport)
-# elif defined(SK_IMPORT)
-#  define SKAPI_ATTR __declspec(dllimport)
-# else
-#  define SKAPI_ATTR extern
-# endif
-# define SKAPI_LOCAL
-# define SKAPI_CALL __stdcall
-# define SKAPI_PTR  __stdcall
-#elif defined(__GNUC__)
-# define SKAPI_ATTR __attribute__((visibility("default")))
-# define SKAPI_CALL
-# define SKAPI_PTR
-#else
-# define SKAPI_ATTR
-# define SKAPI_CALL
-# define SKAPI_PTR
-#endif
-
-// C99
-#include <stdint.h>
-#include <stddef.h>
-
-#ifdef    __cplusplus
+static union { uint32_t u32; unsigned char u8[4]; }
+_skutl_intEndianCheck = { (uint32_t)0x01234567 };
+SkBool32 SKAPI_CALL skIsIntegerBigEndian() {
+  return (_skutl_intEndianCheck.u8[3] == 0x01) ? SK_TRUE : SK_FALSE;
 }
-#endif // __cplusplus
 
-#endif // OPENSK_PLATFORM_H
+static union { float f32; unsigned char u8[4]; }
+_skutl_floatEndianCheck = { (float)0x01234567 };
+SkBool32 SKAPI_CALL skIsFloatBigEndian() {
+  return (_skutl_floatEndianCheck.u8[3] == 0x01) ? SK_TRUE : SK_FALSE;
+}
